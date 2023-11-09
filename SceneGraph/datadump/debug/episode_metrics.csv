@@ -1,0 +1,1 @@
+id, episode_id, scene_id, goal_name, distance_to_goal, success, spl, soft_spl, distance_to_goal_reward

@@ -1,0 +1,114 @@
+ENVIRONMENT:
+  MAX_EPISODE_STEPS: 500
+  turn_angle: 30.0        # agent turn angle (in degrees)
+  frame_height: 480       # first-person frame height (in pixels)
+  frame_width: 640        # first-person frame width (in pixels)
+  camera_height: 0.88     # camera sensor height (in metres)
+  hfov: 79.0              # horizontal field of view (in degrees)
+  min_depth: 0.5          # minimum depth for depth sensor (in metres)
+  max_depth: 5.0          # maximum depth for depth sensor (in metres)
+  evaluate_instance_tracking: False # whether to evaluate the built instance map against groundtruth instance ids
+
+SIMULATOR:
+  TURN_ANGLE: 30
+  TILT_ANGLE: 30
+  ACTION_SPACE_CONFIG: "v1"
+  AGENT_0:
+    SENSORS: ['RGB_SENSOR', 'DEPTH_SENSOR', 'SEMANTIC_SENSOR']
+    HEIGHT: 0.88
+    RADIUS: 0.18
+  HABITAT_SIM_V0:
+    GPU_DEVICE_ID: 0
+    ALLOW_SLIDING: False 
+  SEMANTIC_SENSOR:
+    WIDTH: 640
+    HEIGHT: 480
+    HFOV: 79
+    POSITION: [0, 0.88, 0]
+  RGB_SENSOR:
+    WIDTH: 640
+    HEIGHT: 480
+    HFOV: 79
+    POSITION: [0, 0.88, 0]
+  DEPTH_SENSOR:
+    WIDTH: 640
+    HEIGHT: 480
+    HFOV: 79
+    MIN_DEPTH: 0.5
+    MAX_DEPTH: 5.0
+    POSITION: [0, 0.88, 0]
+  SCENE_DATASET: "/home/zhanxin/Desktop/L3MVN/data/scene_datasets/minival/hm3d_annotated_minival_basis.scene_dataset_config.json"
+
+TASK:
+  TYPE: ObjectNav-v1
+  POSSIBLE_ACTIONS: ["STOP", "MOVE_FORWARD", "TURN_LEFT", "TURN_RIGHT", "LOOK_UP", "LOOK_DOWN"]
+  SENSORS: ['OBJECTGOAL_SENSOR', 'GPS_SENSOR', 'COMPASS_SENSOR']
+  GOAL_SENSOR_UUID: objectgoal
+  MEASUREMENTS: ['DISTANCE_TO_GOAL', 'SUCCESS', 'SPL']
+  DISTANCE_TO_GOAL:
+    DISTANCE_TO: VIEW_POINTS
+  SUCCESS:
+    SUCCESS_DISTANCE: 0.1
+
+DATASET:
+  TYPE: ObjectNav-v1
+  SPLIT: val_mini
+  DATA_PATH: "/home/zhanxin/Desktop/L3MVN/data/objectnav_hm3d/{split}/{split}.json.gz"
+  SCENES_DIR: "/home/zhanxin/Desktop/L3MVN/data/scene_datasets"
+
+TASK_CONFIG:
+  DATASET:
+    TYPE: ObjectNav-v1
+    SPLIT: val_mini
+    DATA_PATH: "/home/zhanxin/Desktop/L3MVN/data/objectnav_hm3d/{split}/{split}.json.gz"
+    SCENES_DIR: "/home/zhanxin/Desktop/L3MVN/data/scene_datasets"
+
+habitat:
+  dataset:
+    type: ObjectNav-v1
+    split: val_mini
+    data_path: "/home/zhanxin/Desktop/L3MVN/data/objectnav_hm3d/{split}/{split}.json.gz"
+    scenes_dir: "/home/zhanxin/Desktop/L3MVN/data/scene_datasets"
+
+
+AGENT:
+  max_steps: 500          # maximum number of steps before stopping an episode
+  panorama_start: 1       # 1: turn around 360 degrees when starting an episode, 0: don't
+  exploration_strategy: seen_frontier  # exploration strategy ("seen_frontier", "been_close_to_frontier")
+  radius: 0.05            # robot radius (in meters)
+  store_all_categories: True  # whether to store all semantic categories in the map or just task-relevant ones
+
+  SEMANTIC_MAP:
+    semantic_categories: coco_indoor # map semantic channel categories ("coco_indoor", "longtail_indoor", "mukul_indoor")
+    num_sem_categories: 17           # number of map semantic channel categories (16, 257, 35) maybe 17 for coco, add door as label 15
+    map_size_cm: 4800        # global map size (in centimeters)
+    map_resolution: 5        # size of map bins (in centimeters)
+    vision_range: 100        # diameter of local map region visible by the agent (in cells)
+    global_downscaling: 2    # ratio of global over local map
+    du_scale: 4              # frame downscaling before projecting to point cloud
+    cat_pred_threshold: 5.0  # number of depth points to be in bin to classify it as a certain semantic category
+    exp_pred_threshold: 1.0  # number of depth points to be in bin to consider it as explored
+    map_pred_threshold: 1.0  # number of depth points to be in bin to consider it as obstacle
+    explored_radius: 150     # radius (in centimeters) of visually explored region
+    been_close_to_radius: 200  # radius (in centimeters) of been close to region
+    must_explore_close: False
+    min_obs_height_cm: 10    # minimum height (in centimeters) of obstacle to be considered as obstacle
+    # erosion and filtering to reduce the number of spurious artifacts
+    dilate_obstacles: False
+    dilate_size: 3
+    dilate_iter: 1
+    # instance mapping
+    record_instance_ids: False  # whether to predict and store instance ids in the map
+    max_instances: 800
+
+  PLANNER:
+    collision_threshold: 0.20       # forward move distance under which we consider there's a collision (in meters)
+    min_obs_dilation_selem_radius: 3    # radius (in cells) of obstacle dilation structuring element
+    obs_dilation_selem_radius: 3    # radius (in cells) of obstacle dilation structuring element
+    goal_dilation_selem_radius: 10  # radius (in cells) of goal dilation structuring element
+    use_dilation_for_stg: False      # use dilated goals for estimating short-term goals - or just reaching
+    map_downsample_factor: 1            # optional downsampling of traversible and goal map before fmm distance call (1 for no downsampling, 2 for halving resolution)
+    map_update_frequency: 1             # compute fmm distance map every n steps 
+    step_size: 5                    # maximum distance of the short-term goal selected by the planner
+    discrete_actions: True         # discrete motion planner output space or not
+    verbose: False
