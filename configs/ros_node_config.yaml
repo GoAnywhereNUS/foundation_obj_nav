@@ -1,0 +1,6 @@
+topics:
+  camera_topic: rs_mid/color/image_raw  # For Realsense
+  image_goal_topic: objnav/image_goal   # For image goals to GNM
+
+params:
+  navigator_frequency: 2    # Navigator node spin frequency (Hz)
