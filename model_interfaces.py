@@ -8,6 +8,9 @@ from PIL import Image
 
 # GPT
 import openai
+import logging
+# Set up logging
+logging.basicConfig(filename='log/llm.log', level=logging.INFO, format='%(asctime)s | %(levelname)s: %(message)s')
 
 # BLIP
 from lavis.models import load_model_and_preprocess
@@ -82,43 +85,150 @@ class ObjectPerception:
             list of bounding boxes
         """
         raise NotImplementedError
-    
+  
 ######## Foundation model instantiations ########
+
+USER_EXAMPLE_1 = """You see the partial layout of the apartment:
+{"room": {"livingroom_1", "connects to": ["door_1", "door_2"]}, "diningroom_1": {,"connects to": ["door_1"]}}, "entrance": {"door_1": {"is near": ["towel_1"], "connects to": ["livingroom_1", "diningroom_1"]}, "door_2": {"is near": [], "connects to": ["livingroom_1"]}}}
+Question: Your goal is to find a sink. If any of the rooms in the layout are likely to contain the target object, specify the most probable room name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found.
+"""
+
+AGENT_EXAMPLE_1 = """Reasoning: There is only livingroom in the layout. livingroom is not likely to contain sink, so I will not explore the current room. Among all the doors, door1 is near to towel. A towel is usually more likely to near the bathroom or kitchen, so it is likely that if you explore door1 you will find a bathroom or kitchen and thus find a sink.
+Sample Answer: door_1
+"""
+
+USER_EXAMPLE_2 = """You see the partial layout of the apartment:
+{"room": {"kitchen_1": {"connects to": ["door_1", "door_2"]}, "bedroom": {"connects to": ["door_2"]}, "entrance": {"door_1": {"is near": ["towel_1"]}, "door_2": {"is near": [], "connects to": ["kitchen_1","bedroom" ]}}}
+Question: Your goal is to find a refrigerator. If any of the rooms in the layout are likely to contain the target object, specify the most probable room name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found.
+"""
+
+AGENT_EXAMPLE_2 = """Reasoning: There are kitchen and bedroom in the layout. Among all the rooms, kitchen is usually likely to contain refrigerator. Since we haven't explored the kitchen yet, it is possible that the refrigerator is in the kitchen yet. Therefore, I will explore kitchen. 
+Sample Answer: kitchen_1
+"""
+
+##############################
+
+CLS_USER_EXAMPLE_1 = """There is a list ["livingroom", "door", "doorway", "table","chair","sofa", "floor", "wall"]. Please classify them into "room," "entrance," and "object" classes."""
+
+CLS_AGENT_EXAMPLE_1 = """Sample Answer:
+room: livingroom
+entrance: door, doorway
+object: table, chair, sofa, floor, wall
+"""
+
+CLS_USER_EXAMPLE_2 = """There is a list ["bathroom", "mirror","sink","toilet", "bathtub", "lamp"]. Please classify them into "room," "entrance," and "object" classes."""
+
+CLS_AGENT_EXAMPLE_2 = """Sample Answer:
+room: livingroom
+entrance: none
+object: mirror, sink, toilet, bathtub, lamp
+"""
+#############################
+
+LOCAL_EXP_USER_EXAMPLE_1 = """There is a list ["mirror", "lamp", "picture", "tool","toilet","sofa", "floor", "wall"]. Please select one object that is most likely located near a sink.
+"""
+
+LOCAL_EXP_AGENT_EXAMPLE_1 = """Reasoning: Among the given options, the object most likely located near a sink is a "mirror." Mirrors are commonly found near sinks in bathrooms for personal grooming and hygiene activities.
+Sample Answer: mirror
+"""
+
+LOCAL_EXP_USER_EXAMPLE_2 = """There is a list ["chair", "sofa", "bed", "dresser","ceiling","closet", "window", "wall"]. Please select one object that is most likely located near a table.
+"""
+
+LOCAL_EXP_AGENT_EXAMPLE_2 = """Reasoning: Among the given options, the object most likely located near a table is a "chair." Chairs are commonly placed around tables for seating during various activities such as dining, working, or socializing.
+Sample Answer: chair
+"""
+
+#######################
 
 class GPTInterface(LLMInterface):
     def __init__(
         self,
         key_path="configs/openai_api_key.yaml",
         config_path="configs/gpt_config.yaml",
+        log_path ='log/llm_query.log'
         ):
-
         super().__init__()
-
         with open(key_path, 'r') as f:
             key_dict = yaml.safe_load(f)
             self.openai_api_key = key_dict['api_key']
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
 
-        self.client = OpenAI(api_key=self.openai_api_key)
+        self.client = openai
+        self.client.api_key = self.openai_api_key
         self.chat = [
-            {"role": "system", "content": self.config["setup_message"]}
+            {"role": "system", "content": self.config["setup_message"]},
+            {"role": "user", "content": USER_EXAMPLE_1},
+            {"role": "assistant", "content": AGENT_EXAMPLE_1},
+            {"role": "user", "content": USER_EXAMPLE_2},
+            {"role": "assistant", "content": AGENT_EXAMPLE_2}
         ]
 
     def reset(self):
         self.chat = [
-            {"role": "system", "content": self.config["setup_message"]}
+            {"role": "system", "content": self.config["setup_message"]},
+            {"role": "user", "content": USER_EXAMPLE_1},
+            {"role": "assistant", "content": AGENT_EXAMPLE_1},
+            {"role": "user", "content": USER_EXAMPLE_2},
+            {"role": "assistant", "content": AGENT_EXAMPLE_2}
         ]
 
     def query(self, string):
+        llm.reset()
         self.chat.append(
             {"role": "user", "content": string}
         )
+        print('QUERY MESSGAE', self.chat)
+
         response = self.client.chat.completions.create(
             model=self.config["model_type"],
             messages=self.chat,
             seed=self.config["seed"]
         )
+        logging.info(f'QUERY MESSAGE: {self.chat}')
+        log_reply =  response.choices[0].message.content.replace("\n", ";")
+        logging.info(f'REPLY MESSAGE: {log_reply}')
+        return response
+    
+    def query_local_explore(self, string):
+        local_exp_query = [
+            {"role": "system", "content": self.config["setup_message"]},
+            {"role": "user", "content": LOCAL_EXP_USER_EXAMPLE_1},
+            {"role": "assistant", "content": LOCAL_EXP_AGENT_EXAMPLE_1},
+            {"role": "user", "content": LOCAL_EXP_USER_EXAMPLE_2},
+            {"role": "assistant", "content": LOCAL_EXP_AGENT_EXAMPLE_2},
+            {"role": "user", "content": string}
+        ]
+        print('QUERY MESSGAE', local_exp_query)
+        response = self.client.chat.completions.create(
+            model=self.config["model_type"],
+            messages=local_exp_query,
+            seed=self.config["seed"]
+        )
+        logging.info(f'QUERY MESSAGE: {local_exp_query}')
+        log_reply =  response.choices[0].message.content.replace("\n", ";")
+        logging.info(f'REPLY MESSAGE: {log_reply}')
+        return response
+
+    def query_object_class(self, string):
+        chat_query_obj = [
+            {"role": "system", "content": self.config["setup_message"]},
+            {"role": "user", "content": CLS_USER_EXAMPLE_1},
+            {"role": "assistant", "content": CLS_AGENT_EXAMPLE_1},
+            {"role": "user", "content": CLS_USER_EXAMPLE_2},
+            {"role": "assistant", "content": CLS_AGENT_EXAMPLE_2},
+            {"role": "user", "content": string}
+        ]
+        print('QUERY MESSGAE', chat_query_obj)
+        response = self.client.chat.completions.create(
+            model=self.config["model_type"],
+            messages=chat_query_obj,
+            seed=self.config["seed"]
+        )
+        logging.info(f'QUERY MESSAGE: {chat_query_obj}')
+        log_reply =  response.choices[0].message.content.replace("\n", ";")
+        logging.info(f'REPLY MESSAGE: {log_reply}')
         return response
 
 
@@ -146,8 +256,8 @@ class VLM_GroundingDino(ObjectPerception):
         self,
         groundingdino_config_path="Grounded-Segment-Anything/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py",
         ram_ckpt_path="checkpoints/ram_swin_large_14m.pth",
-        groundingdino_ckpt_path="checkpoints/groundingdino_swint_ogc.pth",
-        tag2text_ckpt_path="checkpoints/tag2text_swin_14m.pth",
+        groundingdino_ckpt_path="checkpoints/home/zhanxin/Desktop/mount/groundingdino_swint_ogc.pth",
+        tag2text_ckpt_path="checkpoints/home/zhanxin/Desktop/mount/tag2text_swin_14m.pth",
     ):
 
         super().__init__()
@@ -160,7 +270,7 @@ class VLM_GroundingDino(ObjectPerception):
         self.iou_threshold = 0.5
 
         self.gdino_model = build_model(args)
-        self.gdino_model.load_state_dict(gdino_ckpt['model'], strict=False)
+        self.gdino_model.load_state_dict(clean_state_dict(gdino_ckpt['model']), strict=False)
         self.gdino_model.eval()
         self.gdino_model.to(self.device)
 
@@ -177,7 +287,9 @@ class VLM_GroundingDino(ObjectPerception):
         )
 
         self.preprocessor_ram = torchvision.transforms.Compose([
-            torchvision.transforms.Resize((384, 384)),
+            torchvision.transforms.Resize(
+                (384, 384), torchvision.transforms.InterpolationMode.BICUBIC
+            ),
             torchvision.transforms.ToTensor(), 
             torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
         ])
