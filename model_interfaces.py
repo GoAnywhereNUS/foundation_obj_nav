@@ -137,6 +137,7 @@ class VLM_BLIP(VQAPerception):
             "image": self.image_preprocessors["eval"](image).unsqueeze(0).to(self.device),
             "text_input": self.text_preprocessors["eval"](question_prompt)
         }
+
         ans = self.model.predict_answers(samples=samples, inference_method="generate")
         return ans[0]
     
@@ -160,7 +161,7 @@ class VLM_GroundingDino(ObjectPerception):
         self.iou_threshold = 0.5
 
         self.gdino_model = build_model(args)
-        self.gdino_model.load_state_dict(gdino_ckpt['model'], strict=False)
+        self.gdino_model.load_state_dict(clean_state_dict(gdino_ckpt['model']), strict=False)
         self.gdino_model.eval()
         self.gdino_model.to(self.device)
 
@@ -177,7 +178,9 @@ class VLM_GroundingDino(ObjectPerception):
         )
 
         self.preprocessor_ram = torchvision.transforms.Compose([
-            torchvision.transforms.Resize((384, 384)),
+            torchvision.transforms.Resize(
+                (384, 384), torchvision.transforms.InterpolationMode.BICUBIC
+            ),
             torchvision.transforms.ToTensor(), 
             torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
         ])
