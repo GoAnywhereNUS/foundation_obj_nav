@@ -100,7 +100,6 @@ class SceneGraph:
             non_state_nodes: dict, listing the non-state nodes to add.
         """
         raise NotImplementedError
-                
 
     def print_scene_graph(self, json=True, pretty=False):
         """

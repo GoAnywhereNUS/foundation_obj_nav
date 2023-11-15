@@ -1,5 +1,5 @@
 from scene_graph import SceneGraph, default_scene_graph_specs
-from models import GPTInterface, VLM_BLIP, VLM_GroundingDino
+from model_interfaces import GPTInterface, VLM_BLIP, VLM_GroundingDino
 
 class Navigator:
     def __init__(
@@ -91,7 +91,7 @@ class Navigator:
 
     def plan_path(self):
         # TODO: Query LLM
-        
+
         path = self.scene_graph.plan_shortest_paths(self.current_state, goal_node_name)[0]
         return path
     
@@ -115,7 +115,7 @@ class Navigator:
         image_lang_obs = self.observe()
 
         # Localise and update scene graph
-        state = self.estimate_state(self, image_lang_obs)
+        state = self.estimate_state(image_lang_obs)
         state = self.update_scene_graph(state, image_lang_obs)
         self.current_state = state
 
