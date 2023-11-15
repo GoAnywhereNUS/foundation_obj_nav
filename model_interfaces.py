@@ -247,6 +247,7 @@ class VLM_BLIP(VQAPerception):
             "image": self.image_preprocessors["eval"](image).unsqueeze(0).to(self.device),
             "text_input": self.text_preprocessors["eval"](question_prompt)
         }
+
         ans = self.model.predict_answers(samples=samples, inference_method="generate")
         return ans[0]
     
