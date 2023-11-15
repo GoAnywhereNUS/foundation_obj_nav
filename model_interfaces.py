@@ -404,19 +404,20 @@ if __name__ == "__main__":
 
 
     #### ---------------------   LOCAL EXPLOARATION TEST  -------------------------
+    # Notice: add open_ai key config before test
 
-    llm_config_path="configs/gpt_config.yaml"
-    llm = GPTInterface(config_path=llm_config_path)
+    # llm_config_path="configs/gpt_config.yaml"
+    # llm = GPTInterface(config_path=llm_config_path)
 
-    goal = "sofa"
-    start_question = "There is a list."
-    Obs_obj_Discript = "["+ ", ".join(obs['object']) + "]"
-    end_question = f"Please select one object that is most likely located near a {goal}."
-    whole_query = start_question + Obs_obj_Discript + end_question
+    # goal = "sofa"
+    # start_question = "There is a list."
+    # Obs_obj_Discript = "["+ ", ".join(obs['object']) + "]"
+    # end_question = f"Please select one object that is most likely located near a {goal}."
+    # whole_query = start_question + Obs_obj_Discript + end_question
 
-    chat_completion = llm.query_local_explore(whole_query)
-    complete_response = chat_completion.choices[0].message.content.lower()
-    sample_response = complete_response[complete_response.find('sample answer:'):]
-    seperate_ans = re.split('\n|; |, | |sample answer:', sample_response)
-    seperate_ans = [i for i in seperate_ans if i != '']
-    print(seperate_ans) # ans should be separate_ans[0]
+    # chat_completion = llm.query_local_explore(whole_query)
+    # complete_response = chat_completion.choices[0].message.content.lower()
+    # sample_response = complete_response[complete_response.find('sample answer:'):]
+    # seperate_ans = re.split('\n|; |, | |sample answer:', sample_response)
+    # seperate_ans = [i for i in seperate_ans if i != '']
+    # print(seperate_ans) # ans should be separate_ans[0]
