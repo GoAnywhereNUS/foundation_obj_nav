@@ -42,10 +42,21 @@ class SceneGraph:
     def nodes(self):
         return self.scene_graph.nodes()
 
-    def is_type(self, check_node, node_type):
-        return self.scene_graph.nodes()[check_node]['type'] == node_type
+    def is_type(self, node_name, node_type):
+        """
+        Input:
+            node_name: string, label for node that will be used to create unique identifier  
+            node_type: string, specifies the type of node 
+        Return:
+            bool: check whether the node is the specific type or not
+        """
+        return self.scene_graph.nodes()[node_name]['type'] == node_type
 
     def get_secific_type_nodes(self, node_type = 'room'):
+        """
+        Return:
+            room_lst: list, all the room in the scene graph
+        """
         room_lst = [
            item  for item in self.scene_graph.nodes()
             if self.is_type(item, node_type)
