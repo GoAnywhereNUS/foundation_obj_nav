@@ -1,5 +1,6 @@
 from scene_graph import SceneGraph, default_scene_graph_specs
 from model_interfaces import GPTInterface, VLM_BLIP, VLM_GroundingDino
+import json
 
 class Navigator:
     def __init__(
@@ -19,7 +20,7 @@ class Navigator:
         if scene_graph_specs is None:
             # TODO: Query LLM to get the specs
             raise NotImplementedError
-        self.scene_graph_specs = scene_graph_specs
+        self.scene_graph_specs = json.loads(scene_graph_specs)
         self.scene_graph = SceneGraph(scene_graph_specs)
         self.state_spec = self.scene_graph_specs["state"]
         self.current_state = {node_type: None for node_type in self.state_spec}
