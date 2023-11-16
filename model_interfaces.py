@@ -104,14 +104,14 @@ Sample Answer: kitchen_1"""
 
 ##############################
 
-CLS_USER_EXAMPLE_1 = """There is a list ["livingroom", "door", "doorway", "table","chair","livingroom sofa", "floor", "wall"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes."""
+CLS_USER_EXAMPLE_1 = """There is a list: ["livingroom", "door", "doorway", "table","chair","livingroom sofa", "floor", "wall"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes."""
 
 CLS_AGENT_EXAMPLE_1 = """Sample Answer:
 room: livingroom
 entrance: door, doorway
 object: table, chair, sofa, floor, wall"""
 
-CLS_USER_EXAMPLE_2 = """There is a list ["bathroom", "bathroom mirror","bathroom sink","toilet", "bathroom bathtub", "lamp"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes."""
+CLS_USER_EXAMPLE_2 = """There is a list: ["bathroom", "bathroom mirror","bathroom sink","toilet", "bathroom bathtub", "lamp"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes."""
 
 CLS_AGENT_EXAMPLE_2 = """Sample Answer:
 room: bathroom
@@ -119,12 +119,12 @@ entrance: none
 object: mirror, sink, toilet, bathtub, lamp"""
 #############################
 
-LOCAL_EXP_USER_EXAMPLE_1 = """There is a list ["mirror", "lamp", "picture", "tool","toilet","sofa", "floor", "wall"]. Please select one object that is most likely located near a sink."""
+LOCAL_EXP_USER_EXAMPLE_1 = """There is a list: ["mirror", "lamp", "picture", "tool","toilet","sofa", "floor", "wall"]. Please select one object that is most likely located near a sink."""
 
 LOCAL_EXP_AGENT_EXAMPLE_1 = """Reasoning: Among the given options, the object most likely located near a sink is a "mirror." Mirrors are commonly found near sinks in bathrooms for personal grooming and hygiene activities.
 Sample Answer: mirror"""
 
-LOCAL_EXP_USER_EXAMPLE_2 = """There is a list ["chair", "sofa", "bed", "dresser","ceiling","closet", "window", "wall"]. Please select one object that is most likely located near a table."""
+LOCAL_EXP_USER_EXAMPLE_2 = """There is a list: ["chair", "sofa", "bed", "dresser","ceiling","closet", "window", "wall"]. Please select one object that is most likely located near a table."""
 
 LOCAL_EXP_AGENT_EXAMPLE_2 = """Reasoning: Among the given options, the object most likely located near a table is a "chair." Chairs are commonly placed around tables for seating during various activities such as dining, working, or socializing.
 Sample Answer: chair"""

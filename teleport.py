@@ -112,6 +112,21 @@ class NavigatorTeleport(Navigator):
             "object": objects
         }
     
+    def generate_query(self, discript, goal, query_type):
+        if query_type == 'plan':
+            start_question = "You see the partial layout of the apartment:\n"
+            end_question = f"\nQuestion: Your goal is to find a {goal}. If any of the rooms in the layout are likely to contain the target object, reply the most probable room name, not any door name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found. Follow my format to state reasoning and sample answer."
+            whole_query = start_question + discript + end_question
+        elif query_type == 'classify':
+            start_question = "There is a list:"
+            end_question = "Please eliminate redundant strings in the element from the list and classify them into \"room\", \"entrance\", and \"object\" classes.\nSample Answer:"
+            whole_query = start_question + discript + end_question
+        elif query_type == 'local':
+            start_question = "There is a list:"
+            end_question = f"Please select one object that is most likely located near a {goal}."
+            whole_query = start_question + discript + end_question
+        return whole_query
+
     def estimate_state(self, obs):
         """
         Queries the LLM with the observations and scene graph to
@@ -144,12 +159,11 @@ class NavigatorTeleport(Navigator):
         # TODO: Need panaromic view to estimate state
         
         # Begin Query LLM to classify detected objects in 'room','entrance' and 'object' 
-        start_question = "There is a list."
         obj_label = obs['object'][1]
-        Obs_obj_Discript = "["+ ", ".join(obj_label) + "]"
-        end_question = "Please eliminate redundant strings in the element from the list and classify them into \"room\", \"entrance\", and \"object\" classes.\nSample Answer:"
-        whole_query = start_question + Obs_obj_Discript + end_question
+        obs_obj_discript = "["+ ", ".join(obj_label) + "]"
+        whole_query = self.generate_query(obs_obj_discript, None, 'classify')
 
+        
         chat_completion = self.llm.query_object_class(whole_query)
         complete_response = chat_completion.choices[0].message.content.lower()
         complete_response = complete_response.replace(" ", "")
@@ -215,10 +229,9 @@ class NavigatorTeleport(Navigator):
         ########### Begin Query LLM for Plan #################
 
         store_ans = []
-        start_question = "You see the partial layout of the apartment:\n"
+
         Scene_Discript = self.scene_graph.print_scene_graph(pretty=False)
-        end_question = f"\nQuestion: Your goal is to find a {goal}. If any of the rooms in the layout are likely to contain the target object, reply the most probable room name, not any door name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found."
-        whole_query = start_question + Scene_Discript + end_question
+        whole_query = self.generate_query(Scene_Discript, goal, 'plan')
 
         # query LLm for llm_query_trial times and select most common answer
         for i in range(self.llm_query_trial):
@@ -251,11 +264,11 @@ class NavigatorTeleport(Navigator):
         # If we are already in the target room, Start local exploration in the room
         # TODO: maybe later implement to query llm for multiple times.
         if path[-1] == self.current_state:
-            start_question = "There is a list."
+
             obj_lst = self.scene_graph.get_obj_in_room(self.current_state)
-            Obs_obj_Discript = "["+ ", ".join(obj_lst) + "]"
-            end_question = f"Please select one object that is most likely located near a {goal}."
-            whole_query = start_question + Obs_obj_Discript + end_question
+            sg_obj_Discript = "["+ ", ".join(obj_lst) + "]"
+            whole_query = self.generate_query(sg_obj_Discript, goal, 'local')
+
             chat_completion = self.llm.query_local_explore(whole_query)
             complete_response = chat_completion.choices[0].message.content.lower()
             sample_response = complete_response[complete_response.find('sample answer:'):]
