@@ -101,7 +101,7 @@ class SceneGraph:
         """
         raise NotImplementedError
 
-    def print_scene_graph(self, json=True, pretty=False):
+    def print_scene_graph(self, json_flag=True, pretty=False):
         """
         Prints the scene graph as a dict or JSON string. It represents the scene graph
         using the standard format below, which is also used for loading graphs.
@@ -166,7 +166,7 @@ class SceneGraph:
             }
             sg_dict[node_type] = node_instance_atts
 
-        if json:
+        if json_flag:
             return json.dumps(sg_dict, indent=(2 if pretty else None))
         else:
             return sg_dict
