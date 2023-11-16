@@ -133,7 +133,7 @@ class SceneGraph:
         """
         raise NotImplementedError
 
-    def print_scene_graph(self, json_flag=True, pretty=False):
+    def print_scene_graph(self, json_flag=True, pretty=False, skip_object=True):
         """
         Prints the scene graph as a dict or JSON string. It represents the scene graph
         using the standard format below, which is also used for loading graphs.
@@ -173,10 +173,11 @@ class SceneGraph:
             if node_type == "object":
                 # Only list all the objects without listing their edges
                 # since they are the leaf nodes of the scene graph
-                sg_dict["object"] = [
-                    n for n, atts in self.scene_graph.nodes(data=True) 
-                    if atts['type'] == "object"
-                ]
+                if not skip_object:
+                    sg_dict["object"] = [
+                        n for n, atts in self.scene_graph.nodes(data=True) 
+                        if atts['type'] == "object"
+                    ]
                 continue
 
             # Otherwise, list all the nodes of this particular node_type
@@ -185,7 +186,10 @@ class SceneGraph:
                 n for n, atts in self.scene_graph.nodes(data=True) 
                 if atts['type'] == node_type
             ]
-            edge_types = self.scene_graph_specs[node_type]
+            edge_types = self.scene_graph_specs[node_type].copy()
+            if skip_object:
+                edge_types.pop('contains',0)
+
             node_instance_atts = {
                 node_inst: {
                     etype: [

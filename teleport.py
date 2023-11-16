@@ -154,10 +154,7 @@ class NavigatorTeleport(Navigator):
         complete_response = chat_completion.choices[0].message.content.lower()
         complete_response = complete_response.replace(" ", "")
         seperate_ans = re.split('\n|,|:', complete_response)
-        seperate_ans = [i for i in seperate_ans if i != '']
-        
-        class_flag = None
-        
+        seperate_ans = [i for i in seperate_ans if i != '']   
 
         # Update Room Node
         # TODO: whether we need to add new room node
@@ -172,6 +169,8 @@ class NavigatorTeleport(Navigator):
                 self.scene_graph.add_edge(self.current_state, self.last_subgoal, "contains")
         else:
             self.current_state = self.scene_graph.add_node("room", obs['location'], {"image": np.random.rand(4, 4)})
+
+        class_flag = None
 
         for item in seperate_ans:
             if item == 'none':
@@ -199,7 +198,7 @@ class NavigatorTeleport(Navigator):
                     self.scene_graph.add_edge(self.current_state, temp_obj, "contains")
                 except:
                     logging.warning(f'Scene Graph: Fail to add object item {item}')
-
+        logging.info(f'Scene Graph: {self.scene_graph.print_scene_graph(pretty=False, skip_object=False)}')
         return est_state
 
 
@@ -383,7 +382,7 @@ while True:
             print(f'Location: {location}\nObjecet: {obj_lst}')
             nav.update_scene_graph(None, img_lang_obs)
             print('------------  Update Scene Graph   -------------')
-            print(nav.scene_graph.print_scene_graph(pretty=False))
+            print(nav.scene_graph.print_scene_graph(pretty=False,skip_object=False))
     elif key == ord('i'):
         path = nav.plan_path(goal)
         print('-------------  Plan Path --------------')
