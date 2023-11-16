@@ -39,6 +39,19 @@ class SceneGraph:
 
         self.scene_graph = nx.Graph()
 
+    def nodes(self):
+        return self.scene_graph.nodes()
+
+    def is_type(self, check_node, node_type):
+        return self.scene_graph.nodes()[check_node]['type'] == node_type
+
+    def get_secific_type_nodes(self, node_type = 'room'):
+        room_lst = [
+           item  for item in self.scene_graph.nodes()
+            if self.is_type(item, node_type)
+        ]
+        return room_lst
+
     def add_node(self, node_type, node_name, node_dict):
         """
         Adds a node and its attribute dictionary to the scene graph,
@@ -62,6 +75,14 @@ class SceneGraph:
 
     def get_node_attr(self, node_name):
         return self.scene_graph._node[node_name]
+
+    def get_obj_in_room(self, room_name):
+        obj_lst = []
+        if self.scene_graph.has_node(room_name):
+            obj_lst = [ item for item in self.scene_graph[room_name]
+                if self.scene_graph[room_name][item]['relation'] == 'contains'
+            ]
+        return obj_lst   
 
     def add_edge(self, src_node, dst_node, edge_type):
         """
@@ -186,9 +207,9 @@ class SceneGraph:
         num_name_instances = self.count_instances(node_type, node_name)
         return node_name + "_" + str(num_name_instances + 1)
     
-    def plan_shortest_paths(self, current_state, goal_node_name):
-        # TODO
-        raise NotImplementedError
+    def plan_shortest_paths(self, current_node_name, goal_node_name):
+        path = nx.shortest_path(self.scene_graph, current_node_name, goal_node_name)
+        return path
     
 if __name__ == "__main__":
     import numpy as np

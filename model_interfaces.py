@@ -90,54 +90,44 @@ class ObjectPerception:
 
 USER_EXAMPLE_1 = """You see the partial layout of the apartment:
 {"room": {"livingroom_1", "connects to": ["door_1", "door_2"]}, "diningroom_1": {,"connects to": ["door_1"]}}, "entrance": {"door_1": {"is near": ["towel_1"], "connects to": ["livingroom_1", "diningroom_1"]}, "door_2": {"is near": [], "connects to": ["livingroom_1"]}}}
-Question: Your goal is to find a sink. If any of the rooms in the layout are likely to contain the target object, specify the most probable room name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found.
-"""
+Question: Your goal is to find a sink. If any of the rooms in the layout are likely to contain the target object, specify the most probable room name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found."""
 
 AGENT_EXAMPLE_1 = """Reasoning: There is only livingroom in the layout. livingroom is not likely to contain sink, so I will not explore the current room. Among all the doors, door1 is near to towel. A towel is usually more likely to near the bathroom or kitchen, so it is likely that if you explore door1 you will find a bathroom or kitchen and thus find a sink.
-Sample Answer: door_1
-"""
+Sample Answer: door_1"""
 
 USER_EXAMPLE_2 = """You see the partial layout of the apartment:
 {"room": {"kitchen_1": {"connects to": ["door_1", "door_2"]}, "bedroom": {"connects to": ["door_2"]}, "entrance": {"door_1": {"is near": ["towel_1"]}, "door_2": {"is near": [], "connects to": ["kitchen_1","bedroom" ]}}}
-Question: Your goal is to find a refrigerator. If any of the rooms in the layout are likely to contain the target object, specify the most probable room name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found.
-"""
+Question: Your goal is to find a refrigerator. If any of the rooms in the layout are likely to contain the target object, specify the most probable room name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found."""
 
 AGENT_EXAMPLE_2 = """Reasoning: There are kitchen and bedroom in the layout. Among all the rooms, kitchen is usually likely to contain refrigerator. Since we haven't explored the kitchen yet, it is possible that the refrigerator is in the kitchen yet. Therefore, I will explore kitchen. 
-Sample Answer: kitchen_1
-"""
+Sample Answer: kitchen_1"""
 
 ##############################
 
-CLS_USER_EXAMPLE_1 = """There is a list ["livingroom", "door", "doorway", "table","chair","sofa", "floor", "wall"]. Please classify them into "room," "entrance," and "object" classes."""
+CLS_USER_EXAMPLE_1 = """There is a list ["livingroom", "door", "doorway", "table","chair","livingroom sofa", "floor", "wall"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes."""
 
 CLS_AGENT_EXAMPLE_1 = """Sample Answer:
 room: livingroom
 entrance: door, doorway
-object: table, chair, sofa, floor, wall
-"""
+object: table, chair, sofa, floor, wall"""
 
-CLS_USER_EXAMPLE_2 = """There is a list ["bathroom", "mirror","sink","toilet", "bathtub", "lamp"]. Please classify them into "room," "entrance," and "object" classes."""
+CLS_USER_EXAMPLE_2 = """There is a list ["bathroom", "bathroom mirror","bathroom sink","toilet", "bathroom bathtub", "lamp"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes."""
 
 CLS_AGENT_EXAMPLE_2 = """Sample Answer:
-room: livingroom
+room: bathroom
 entrance: none
-object: mirror, sink, toilet, bathtub, lamp
-"""
+object: mirror, sink, toilet, bathtub, lamp"""
 #############################
 
-LOCAL_EXP_USER_EXAMPLE_1 = """There is a list ["mirror", "lamp", "picture", "tool","toilet","sofa", "floor", "wall"]. Please select one object that is most likely located near a sink.
-"""
+LOCAL_EXP_USER_EXAMPLE_1 = """There is a list ["mirror", "lamp", "picture", "tool","toilet","sofa", "floor", "wall"]. Please select one object that is most likely located near a sink."""
 
 LOCAL_EXP_AGENT_EXAMPLE_1 = """Reasoning: Among the given options, the object most likely located near a sink is a "mirror." Mirrors are commonly found near sinks in bathrooms for personal grooming and hygiene activities.
-Sample Answer: mirror
-"""
+Sample Answer: mirror"""
 
-LOCAL_EXP_USER_EXAMPLE_2 = """There is a list ["chair", "sofa", "bed", "dresser","ceiling","closet", "window", "wall"]. Please select one object that is most likely located near a table.
-"""
+LOCAL_EXP_USER_EXAMPLE_2 = """There is a list ["chair", "sofa", "bed", "dresser","ceiling","closet", "window", "wall"]. Please select one object that is most likely located near a table."""
 
 LOCAL_EXP_AGENT_EXAMPLE_2 = """Reasoning: Among the given options, the object most likely located near a table is a "chair." Chairs are commonly placed around tables for seating during various activities such as dining, working, or socializing.
-Sample Answer: chair
-"""
+Sample Answer: chair"""
 
 #######################
 
@@ -175,7 +165,7 @@ class GPTInterface(LLMInterface):
         ]
 
     def query(self, string):
-        llm.reset()
+        self.reset()
         self.chat.append(
             {"role": "user", "content": string}
         )
@@ -256,9 +246,9 @@ class VLM_GroundingDino(ObjectPerception):
     def __init__(
         self,
         groundingdino_config_path="Grounded-Segment-Anything/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py",
-        ram_ckpt_path="checkpoints/ram_swin_large_14m.pth",
-        groundingdino_ckpt_path="checkpoints/home/zhanxin/Desktop/mount/groundingdino_swint_ogc.pth",
-        tag2text_ckpt_path="checkpoints/home/zhanxin/Desktop/mount/tag2text_swin_14m.pth",
+        ram_ckpt_path="/home/zhanxin/Desktop/mount/ram_swin_large_14m.pth",
+        groundingdino_ckpt_path="/home/zhanxin/Desktop/mount/groundingdino_swint_ogc.pth",
+        tag2text_ckpt_path="/home/zhanxin/Desktop/mount/tag2text_swin_14m.pth",
     ):
 
         super().__init__()
@@ -391,7 +381,7 @@ class VLM_GroundingDino(ObjectPerception):
 
 
 if __name__ == "__main__":
-    image = Image.open("test.png")
+    image = Image.open("/home/zhanxin/Desktop/SceneGraph/obs.png")
 
     blip = VLM_BLIP()
     output = blip.query(image, "Where is the photo taken?")
