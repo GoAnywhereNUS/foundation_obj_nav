@@ -248,6 +248,7 @@ class NavigatorTeleport(Navigator):
         entrance_lst = seperate_ans[entrance_idx+1:object_idx]
         object_lst = seperate_ans[object_idx+1:]
 
+        # TODO: If the replt does not have '_', update fails.
         bbox_idx_to_obj_name = {}
         for item in object_lst:
             if item == 'none':
@@ -312,22 +313,20 @@ class NavigatorTeleport(Navigator):
                 store_ans.append(seperate_ans[0])
         
         # use whole lopp to choose the most common goal name that is in the scene graph
-        print('Receving Ans from LLM:', store_ans)
+        print('PLAN INFO] Receving Ans from LLM:', store_ans)
 
         store_ans_copy = store_ans.copy()
         goal_node_name = most_common(store_ans)
-        # TODO: bugs in the loop
+        # TODO: If the ans is not any valid node in sene graph, error
         while goal_node_name not in self.scene_graph.nodes():
             store_ans = [i for i in store_ans if i != goal_node_name]
             if len(store_ans) == 0:
                 logging.error(f'PLAN: cannot find a valid goal node name. Answer Store: {store_ans_copy}')
                 print(f'PLAN: cannot find a valid goal node name. Answer Store: {store_ans_copy}')
                 raise NotImplementedError
-            print(store_ans, goal_node_name, most_common(store_ans))
             goal_node_name = most_common(store_ans)
         
-        print('ANS TRIAL:', store_ans)
-        print(self.current_state, goal_node_name)
+        print(f'[PLAN INFO] current state:{self.current_state}, goal state:{goal_node_name}')
 
         ########### End Query LLM for Plan #################
 

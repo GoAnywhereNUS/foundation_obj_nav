@@ -96,11 +96,11 @@ AGENT_EXAMPLE_1 = """Reasoning: There is only livingroom in the layout. livingro
 Sample Answer: door_1"""
 
 USER_EXAMPLE_2 = """You see the partial layout of the apartment:
-{"room": {"kitchen_1": {"connects to": ["door_1", "door_2"]}, "bedroom": {"connects to": ["door_2"]}, "entrance": {"door_1": {"is near": ["towel_1"]}, "door_2": {"is near": [], "connects to": ["kitchen_1","bedroom" ]}}}
-Question: Your goal is to find a refrigerator. If any of the rooms in the layout are likely to contain the target object, specify the most probable room name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found."""
+{"room": {"livingroom_1": {"connects to": ["doorway_1", "door_2"]}, "entrance": {"doorway_1": {"is near": ["table_1"]}, "door_2": {"is near": ["clock_1"], "connects to": ["livingroom_1" ]}}}
+Question: Your goal is to find a oven. If any of the rooms in the layout are likely to contain the target object, specify the most probable room name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found."""
 
-AGENT_EXAMPLE_2 = """Reasoning: There are kitchen and bedroom in the layout. Among all the rooms, kitchen is usually likely to contain refrigerator. Since we haven't explored the kitchen yet, it is possible that the refrigerator is in the kitchen yet. Therefore, I will explore kitchen. 
-Sample Answer: kitchen_1"""
+AGENT_EXAMPLE_2 = """Reasoning: There are only livingroom in the layout. Among all the rooms, livingroom is usually unlikely to contain oven, making it less likely for me to find oven in the current room. Instead, I plan to explore other rooms connected to current living room via entrances. Evaluating the entrances, doorway1 stands out as it is close to a table. Tables are commonly found in kitchens, which often contain ovens. Therefore, I have decided to explore through doorway_1.
+Sample Answer: doorway_1"""
 
 USER_EXAMPLE_3 = """You see the partial layout of the apartment:
 {"room": {"kitchen_1": {"connects to": ["stair_1"]}, "livingroom": {"connects to": ["stair_1"]}, "entrance": {"stair_1": {"is near": []}}}}
