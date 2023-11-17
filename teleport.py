@@ -56,6 +56,7 @@ class NavigatorTeleport(Navigator):
         )
 
         self.llm_query_trial = 3
+        self.defined_entrance = ['door', 'doorway', 'entrance']
         # Initialise foundation models used for agent's functions
         '''
         self.llm = GPTInterface(config_path=llm_config_path)
@@ -83,6 +84,50 @@ class NavigatorTeleport(Navigator):
         else:
             return self.perception['object'].detect_all_objects(image)
 
+    def calculate_iou(self, bbox1, bbox2):
+        # Calculate the intersection coordinates
+        x1_inter = max(bbox1[0], bbox2[0])
+        y1_inter = max(bbox1[1], bbox2[1])
+        x2_inter = min(bbox1[2], bbox2[2])
+        y2_inter = min(bbox1[3], bbox2[3])
+
+        # Calculate the area of intersection
+        intersection_area = max(0, x2_inter - x1_inter + 1) * max(0, y2_inter - y1_inter + 1)
+
+        # Calculate the areas of each bounding box
+        area_bbox1 = (bbox1[2] - bbox1[0] + 1) * (bbox1[3] - bbox1[1] + 1)
+        area_bbox2 = (bbox2[2] - bbox2[0] + 1) * (bbox2[3] - bbox2[1] + 1)
+
+        # Calculate the Union area
+        union_area = area_bbox1 + area_bbox2 - intersection_area
+
+        if union_area <= 0:
+            return 0  # No overlap, IoU is 0
+
+        # Calculate the IoU
+        iou = intersection_area / union_area
+
+        return iou
+
+    def get_nearby_bbox(self, target_bbox, all_bbox, distance_threshold = 100, overlap_threshold = 0.1):
+        #Sample data: Bounding boxes as (x_min, y_min, x_max, y_max)
+
+        # Calculate the center of the specific bounding box
+        specific_center = ((target_bbox[0] + target_bbox[2]) / 2, (target_bbox[1] + target_bbox[3]) / 2)
+
+        # # Find nearby bounding boxes 
+        nearby_bboxes_idx = []
+        for i in range(len(all_bbox)):
+            bbox = all_bbox[i]
+            if list(bbox) == list(target_bbox):
+                continue
+            if np.sqrt((bbox[0] - specific_center[0])**2 + (bbox[1] - specific_center[1])**2) <= distance_threshold:
+                # print(np.sqrt((bbox[0] - specific_center[0])**2 + (bbox[1] - specific_center[1])**2))
+                nearby_bboxes_idx.append(i)
+            elif self.calculate_iou(target_bbox, bbox) > overlap_threshold:
+                nearby_bboxes_idx.append(i)
+        return nearby_bboxes_idx
+
     def query_vqa(self, image, prompt):
         return self.perception['vqa'].query(image, prompt)
     
@@ -106,7 +151,14 @@ class NavigatorTeleport(Navigator):
         """
         image = obs_rgb
         location = self.query_vqa(image, "Which room is the photo?")
-        objects = self.query_objects(image)
+        location = location.replace(" ", "") #clean space between "living room"
+        # print(f'Entrance Check: {self.query_vqa(image, "Is there a door in the photo?"), self.query_vqa(image, "Is the door in the photo open?")}')
+        
+        if self.query_vqa(image, "Is there a door in the photo?") == 'yes':
+            objects = self.query_objects(image,  self.defined_entrance)
+            # print(f'Update Detection added door: {objects}')
+        else:
+            objects = self.query_objects(image)
         return {
             "location": location,
             "object": objects
@@ -160,6 +212,9 @@ class NavigatorTeleport(Navigator):
         
         # Begin Query LLM to classify detected objects in 'room','entrance' and 'object' 
         obj_label = obs['object'][1]
+        obj_bbox = obs['object'][0]
+        # Add bbox index into obj label
+        obj_label = [f'{item}_{index}' for index, item in enumerate(obj_label)]
         obs_obj_discript = "["+ ", ".join(obj_label) + "]"
         whole_query = self.generate_query(obs_obj_discript, None, 'classify')
 
@@ -168,50 +223,63 @@ class NavigatorTeleport(Navigator):
         complete_response = chat_completion.choices[0].message.content.lower()
         complete_response = complete_response.replace(" ", "")
         seperate_ans = re.split('\n|,|:', complete_response)
-        seperate_ans = [i for i in seperate_ans if i != '']   
+        seperate_ans = [i.replace('.','') for i in seperate_ans if i != '']   
 
-        # Update Room Node
+        # Update Room Node / Estimate State
         # TODO: whether we need to add new room node
         # Currently we assume the layout only has one room for each room type
         room_lst_scene_graph = self.scene_graph.get_secific_type_nodes('room')
         diff_room = [room[:room.index('_')] for room in room_lst_scene_graph]
         # if current room is already in scene graph
+
+        # print('DIFF ROOM', diff_room)
         if obs['location'] in diff_room:
             self.current_state = room_lst_scene_graph[diff_room.index(obs['location'])]
-
-            if self.last_subgoal != None and self.scene_graph.is_type(self.last_subgoal, 'entrance'):
-                self.scene_graph.add_edge(self.current_state, self.last_subgoal, "contains")
         else:
             self.current_state = self.scene_graph.add_node("room", obs['location'], {"image": np.random.rand(4, 4)})
+            if self.last_subgoal != None and self.scene_graph.is_type(self.last_subgoal, 'entrance'):
+                self.scene_graph.add_edge(self.current_state, self.last_subgoal, "connects to")
 
-        class_flag = None
+        room_idx = seperate_ans.index('room')
+        entrance_idx = seperate_ans.index('entrance')
+        object_idx = seperate_ans.index('object')
+        
+        room_lst = seperate_ans[room_idx+1:entrance_idx]
+        entrance_lst = seperate_ans[entrance_idx+1:object_idx]
+        object_lst = seperate_ans[object_idx+1:]
 
-        for item in seperate_ans:
+        bbox_idx_to_obj_name = {}
+        for item in object_lst:
             if item == 'none':
                 continue
-            class_mapping = {
-                'room': 'ROOM',
-                'entrance': 'ENTRANCE',
-                'object': 'OBJECT',
-            }
-            class_flag = class_mapping.get(item, class_flag)
-            # Update llm output flag
-            if item in class_mapping.keys():
-                continue
-            # Update entrance Node
-            if class_flag == 'ENTRANCE':
-                if self.current_state[:-2] == item:
-                    continue
-                temp_entrance = self.scene_graph.add_node("entrance", item, {"image": np.random.rand(4, 4)})
-                self.scene_graph.add_edge(self.current_state, temp_entrance, "contains")
-                # TODO: Calculate nearby labels
-            # Update object Node
-            elif class_flag == 'OBJECT':
-                try:
-                    temp_obj = self.scene_graph.add_node("object", item, {"image": np.random.rand(4, 4)})
+            try:
+                if '_' in item:
+                    obj_name = item.split('_')[0]
+                    bb_idx = int(item.split('_')[1])
+                    temp_obj = self.scene_graph.add_node("object", obj_name, {"image": np.random.rand(4, 4)})
                     self.scene_graph.add_edge(self.current_state, temp_obj, "contains")
-                except:
-                    logging.warning(f'Scene Graph: Fail to add object item {item}')
+                    bbox_idx_to_obj_name[bb_idx] = temp_obj
+            except:
+                logging.warning(f'Scene Graph: Fail to add object item {item}')
+
+        for item in entrance_lst:
+            if item == 'none':
+                continue
+            if '_' in item:
+                entrance_name = item.split('_')[0]
+                bb_idx = int(item.split('_')[1])
+                
+                if self.current_state[:-2] == entrance_name:
+                    continue
+                temp_entrance = self.scene_graph.add_node("entrance", entrance_name, {"image": np.random.rand(4, 4)})
+                self.scene_graph.add_edge(self.current_state, temp_entrance, "connects to")
+
+                nearby_bbox_idx = self.get_nearby_bbox(obj_bbox[bb_idx],obj_bbox)
+                for idx in nearby_bbox_idx:
+                    if idx in bbox_idx_to_obj_name.keys():
+                        new_obj = bbox_idx_to_obj_name[idx] 
+                        self.scene_graph.add_edge(temp_entrance, new_obj, "is near")
+
         logging.info(f'Scene Graph: {self.scene_graph.print_scene_graph(pretty=False, skip_object=False)}')
         return est_state
 
@@ -239,19 +307,23 @@ class NavigatorTeleport(Navigator):
             complete_response = chat_completion.choices[0].message.content.lower()
             sample_response = complete_response[complete_response.find('sample answer:'):]
             seperate_ans = re.split('\n|; |, | |sample answer:', sample_response)
-            seperate_ans = [i for i in seperate_ans if i != '']
+            seperate_ans = [i.replace('.','') for i in seperate_ans if i != ''] # to make sink. to sink
             if len(seperate_ans) > 0:
                 store_ans.append(seperate_ans[0])
         
         # use whole lopp to choose the most common goal name that is in the scene graph
+        print('Receving Ans from LLM:', store_ans)
+
         store_ans_copy = store_ans.copy()
         goal_node_name = most_common(store_ans)
+        # TODO: bugs in the loop
         while goal_node_name not in self.scene_graph.nodes():
-            store_ans = [i for i in seperate_ans if i != goal_node_name]
+            store_ans = [i for i in store_ans if i != goal_node_name]
             if len(store_ans) == 0:
                 logging.error(f'PLAN: cannot find a valid goal node name. Answer Store: {store_ans_copy}')
                 print(f'PLAN: cannot find a valid goal node name. Answer Store: {store_ans_copy}')
                 raise NotImplementedError
+            print(store_ans, goal_node_name, most_common(store_ans))
             goal_node_name = most_common(store_ans)
         
         print('ANS TRIAL:', store_ans)
@@ -273,7 +345,7 @@ class NavigatorTeleport(Navigator):
             complete_response = chat_completion.choices[0].message.content.lower()
             sample_response = complete_response[complete_response.find('sample answer:'):]
             seperate_ans = re.split('\n|; |, | |sample answer:', sample_response)
-            seperate_ans = [i for i in seperate_ans if i != '']
+            seperate_ans = [i.replace('.','') for i in seperate_ans if i != '']
             path = seperate_ans # ans should be separate_ans[0]
         
         # if next ubgoal is entrance, we mark it.
@@ -400,5 +472,7 @@ while True:
         path = nav.plan_path(goal)
         print('-------------  Plan Path --------------')
         print(path)
-
+    elif key == ord('s'):
+        Image.fromarray(obs['color_sensor']).save('/home/zhanxin/Desktop/SceneGraph/test.png')
+        print('-------------  Plan Path --------------')
 cv2.destroyAllWindows()

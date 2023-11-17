@@ -102,21 +102,36 @@ Question: Your goal is to find a refrigerator. If any of the rooms in the layout
 AGENT_EXAMPLE_2 = """Reasoning: There are kitchen and bedroom in the layout. Among all the rooms, kitchen is usually likely to contain refrigerator. Since we haven't explored the kitchen yet, it is possible that the refrigerator is in the kitchen yet. Therefore, I will explore kitchen. 
 Sample Answer: kitchen_1"""
 
+USER_EXAMPLE_3 = """You see the partial layout of the apartment:
+{"room": {"kitchen_1": {"connects to": ["stair_1"]}, "livingroom": {"connects to": ["stair_1"]}, "entrance": {"stair_1": {"is near": []}}}}
+Question: Your goal is to find a sink. If any of the rooms in the layout are likely to contain the target object, specify the most probable room name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found."""
+
+AGENT_EXAMPLE_3 = """Reasoning: There are kitchen and livingroom in the layout. Among all the rooms, kitchen is usually likely to contain sink. Since we haven't explored the kitchen yet, it is possible that the sink is in the kitchen. Therefore, I will explore kitchen. 
+Sample Answer: kitchen_1"""
+
+USER_EXAMPLE_4 = """You see the partial layout of the apartment:
+{"room": {"livingroom_1": {"connects to": []}}}
+Question: Your goal is to find a sink. If any of the rooms in the layout are likely to contain the target object, specify the most probable room name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found."""
+
+AGENT_EXAMPLE_4 = """Reasoning: There is only livingroom in the layout. livingroom is not likely to contain sink, but there is no entrance/door/doorway in the layout. Therefore, there is nothing to explore, I have to reply.
+Sample Answer: None"""
+
+
 ##############################
 
-CLS_USER_EXAMPLE_1 = """There is a list: ["livingroom", "door", "doorway", "table","chair","livingroom sofa", "floor", "wall"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes."""
+CLS_USER_EXAMPLE_1 = """There is a list: ["livingroom_0", "hallway_1", "door_2", "doorway_3", "table_4","chair_5","livingroom sofa_6", "floor_7", "wall_8", "doorway_9"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes."""
 
 CLS_AGENT_EXAMPLE_1 = """Sample Answer:
-room: livingroom
-entrance: door, doorway
-object: table, chair, sofa, floor, wall"""
+room: livingroom_0
+entrance: door_2, doorway_3, hallway_1, doorway_9
+object: table_4, chair_5, sofa_6, floor_7, wall_8"""
 
-CLS_USER_EXAMPLE_2 = """There is a list: ["bathroom", "bathroom mirror","bathroom sink","toilet", "bathroom bathtub", "lamp"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes."""
+CLS_USER_EXAMPLE_2 = """There is a list: ["bathroom_0", "bathroom mirror_1","bathroom sink_2","toilet_3", "bathroom bathtub_4", "lamp_5"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes."""
 
 CLS_AGENT_EXAMPLE_2 = """Sample Answer:
-room: bathroom
+room: bathroom_0
 entrance: none
-object: mirror, sink, toilet, bathtub, lamp"""
+object: mirror_1, sink_2, toilet_3, bathtub_4, lamp_5"""
 #############################
 
 LOCAL_EXP_USER_EXAMPLE_1 = """There is a list: ["mirror", "lamp", "picture", "tool","toilet","sofa", "floor", "wall"]. Please select one object that is most likely located near a sink."""
@@ -152,7 +167,11 @@ class GPTInterface(LLMInterface):
             {"role": "user", "content": USER_EXAMPLE_1},
             {"role": "assistant", "content": AGENT_EXAMPLE_1},
             {"role": "user", "content": USER_EXAMPLE_2},
-            {"role": "assistant", "content": AGENT_EXAMPLE_2}
+            {"role": "assistant", "content": AGENT_EXAMPLE_2},
+            {"role": "user", "content": USER_EXAMPLE_3},
+            {"role": "assistant", "content": AGENT_EXAMPLE_3},
+            {"role": "user", "content": USER_EXAMPLE_4},
+            {"role": "assistant", "content": AGENT_EXAMPLE_4}
         ]
 
     def reset(self):
@@ -161,7 +180,11 @@ class GPTInterface(LLMInterface):
             {"role": "user", "content": USER_EXAMPLE_1},
             {"role": "assistant", "content": AGENT_EXAMPLE_1},
             {"role": "user", "content": USER_EXAMPLE_2},
-            {"role": "assistant", "content": AGENT_EXAMPLE_2}
+            {"role": "assistant", "content": AGENT_EXAMPLE_2},
+            {"role": "user", "content": USER_EXAMPLE_3},
+            {"role": "assistant", "content": AGENT_EXAMPLE_3},
+            {"role": "user", "content": USER_EXAMPLE_4},
+            {"role": "assistant", "content": AGENT_EXAMPLE_4}
         ]
 
     def query(self, string):
@@ -169,16 +192,16 @@ class GPTInterface(LLMInterface):
         self.chat.append(
             {"role": "user", "content": string}
         )
-        print('QUERY MESSGAE', self.chat)
+        print('PLAN QUERY MESSGAE', self.chat)
 
         response = self.client.chat.completions.create(
             model=self.config["model_type"],
             messages=self.chat,
             seed=self.config["seed"]
         )
-        logging.info(f'QUERY MESSAGE: {self.chat}')
+        logging.info(f'PLAN QUERY MESSAGE: {self.chat}')
         log_reply =  response.choices[0].message.content.replace("\n", ";")
-        logging.info(f'REPLY MESSAGE: {log_reply}')
+        logging.info(f'PLAN REPLY MESSAGE: {log_reply}')
         return response
     
     def query_local_explore(self, string):
@@ -196,9 +219,9 @@ class GPTInterface(LLMInterface):
             messages=local_exp_query,
             seed=self.config["seed"]
         )
-        logging.info(f'QUERY MESSAGE: {local_exp_query}')
+        logging.info(f'LOCAL QUERY MESSAGE: {local_exp_query}')
         log_reply =  response.choices[0].message.content.replace("\n", ";")
-        logging.info(f'REPLY MESSAGE: {log_reply}')
+        logging.info(f'LOCAL REPLY MESSAGE: {log_reply}')
         return response
 
     def query_object_class(self, string):
@@ -216,9 +239,9 @@ class GPTInterface(LLMInterface):
             messages=chat_query_obj,
             seed=self.config["seed"]
         )
-        logging.info(f'QUERY MESSAGE: {chat_query_obj}')
+        logging.info(f'CLASSIFY QUERY MESSAGE: {chat_query_obj}')
         log_reply =  response.choices[0].message.content.replace("\n", ";")
-        logging.info(f'REPLY MESSAGE: {log_reply}')
+        logging.info(f'CLASSIFY REPLY MESSAGE: {log_reply}')
         return response
 
 
