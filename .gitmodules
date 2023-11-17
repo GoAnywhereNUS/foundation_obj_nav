@@ -4,3 +4,6 @@
 [submodule "Grounded-Segment-Anything"]
 	path = Grounded-Segment-Anything
 	url = https://github.com/IDEA-Research/Grounded-Segment-Anything.git
+[submodule "baselines/L3MVN"]
+	path = baselines/L3MVN
+	url = https://github.com/ybgdgh/L3MVN.git
