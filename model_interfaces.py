@@ -203,7 +203,7 @@ class GPTInterface(LLMInterface):
         self.chat.append(
             {"role": "user", "content": string}
         )
-        print('PLAN QUERY MESSGAE', self.chat)
+        print('PLAN MESSGAE', string)
 
         response = self.client.chat.completions.create(
             model=self.config["model_type"],
@@ -224,7 +224,7 @@ class GPTInterface(LLMInterface):
             {"role": "assistant", "content": LOCAL_EXP_AGENT_EXAMPLE_2},
             {"role": "user", "content": string}
         ]
-        print('QUERY MESSGAE', local_exp_query)
+        print('LOCAL MESSGAE', string)
         response = self.client.chat.completions.create(
             model=self.config["model_type"],
             messages=local_exp_query,
@@ -244,7 +244,7 @@ class GPTInterface(LLMInterface):
             {"role": "assistant", "content": CLS_AGENT_EXAMPLE_2},
             {"role": "user", "content": string}
         ]
-        print('QUERY MESSGAE', chat_query_obj)
+        print('CLASSIFY MESSGAE', string)
         response = self.client.chat.completions.create(
             model=self.config["model_type"],
             messages=chat_query_obj,
