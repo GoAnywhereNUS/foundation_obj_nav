@@ -9,8 +9,6 @@ from PIL import Image
 # GPT
 import openai
 import logging
-# Set up logging
-logging.basicConfig(filename='log/llm.log', level=logging.INFO, format='%(asctime)s | %(levelname)s: %(message)s')
 
 # BLIP
 from lavis.models import load_model_and_preprocess
@@ -32,8 +30,19 @@ sys.path.remove(tag2text_path)
 ######## Interface classes ########
 
 class LLMInterface:
-    def __init__(self):
-        pass
+    def __init__(self, log_path):
+        dirname = os.path.dirname(log_path)
+        try:
+            os.makedirs(dirname, exist_ok=True)
+        except FileNotFoundError:
+            if dirname != "":
+                raise Exception("Directory creation error! " + str(dirname))
+
+        logging.basicConfig(
+            filename=log_path, 
+            level=logging.INFO, 
+            format='%(asctime)s | %(levelname)s: %(message)s'
+        )
 
     def reset(self):
         """
@@ -151,9 +160,11 @@ class GPTInterface(LLMInterface):
         self,
         key_path="configs/openai_api_key.yaml",
         config_path="configs/gpt_config.yaml",
-        log_path ='log/llm_query.log'
+        log_path ='logs/llm_query.log'
         ):
-        super().__init__()
+
+        super().__init__(log_path)
+
         with open(key_path, 'r') as f:
             key_dict = yaml.safe_load(f)
             self.openai_api_key = key_dict['api_key']
@@ -269,9 +280,8 @@ class VLM_GroundingDino(ObjectPerception):
     def __init__(
         self,
         groundingdino_config_path="Grounded-Segment-Anything/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py",
-        ram_ckpt_path="/home/zhanxin/Desktop/mount/ram_swin_large_14m.pth",
-        groundingdino_ckpt_path="/home/zhanxin/Desktop/mount/groundingdino_swint_ogc.pth",
-        tag2text_ckpt_path="/home/zhanxin/Desktop/mount/tag2text_swin_14m.pth",
+        ram_ckpt_path="checkpoints/ram_swin_large_14m.pth",
+        groundingdino_ckpt_path="checkpoints/groundingdino_swint_ogc.pth",
     ):
 
         super().__init__()
@@ -404,11 +414,11 @@ class VLM_GroundingDino(ObjectPerception):
 
 
 if __name__ == "__main__":
-    image = Image.open("/home/zhanxin/Desktop/SceneGraph/obs.png")
+    image = Image.open("test.png")
 
-    blip = VLM_BLIP()
-    output = blip.query(image, "Where is the photo taken?")
-    print(output)
+    #blip = VLM_BLIP()
+    #output = blip.query(image, "Where is the photo taken?")
+    #print(output)
 
     gdino = VLM_GroundingDino()
     boxes, labels = gdino.detect_all_objects(image)

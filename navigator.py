@@ -41,19 +41,21 @@ class Navigator:
     def query_vqa(self, image, prompt):
         return self.perception['vqa'].query(image, prompt)
     
-    def _get_image(self):
+    def _observe(self):
         """
-        Get most recent image from embodied agent. 
-        To be overridden in each Navigator subclass.
+        Get observations from the environment (e.g. render images for
+        an agent in sim, or take images at current location on real robot).
+        To be overridden in subclass.
 
-        Returns:
-            image: cv2.Image object
+        Return:
+            images: dict of images taken at current pose
         """
         raise NotImplementedError
-    
-    def observe(self):
+
+    def perceive(self, images):
         """
-        Generate observations.
+        Process raw images into image-language observations for the LLM's
+        consumption.
 
         Return:
             location: name of current location answered by VQA

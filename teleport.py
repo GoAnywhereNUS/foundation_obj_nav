@@ -1,44 +1,18 @@
-import math
 import os
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-import random
-import sys
 import cv2
-import git
-import imageio
-import magnum as mn
 import numpy as np
-import pdb
-from matplotlib import pyplot as plt
 import re
 from PIL import Image
-
-
-# Set up logging
 import logging
-logging.basicConfig(filename='log/llm.log', level=logging.INFO, format='%(asctime)s | %(levelname)s: %(message)s')
+import matplotlib.pyplot as plt
 
-sys.path.append("/home/zhanxin/Desktop/habitat-sim")
 import habitat_sim
-from habitat_sim.utils import common as utils
-from habitat_sim.utils import viz_utils as vut
 
 from navigator import *
-
 from scene_graph import SceneGraph, default_scene_graph_specs
-from model_interfaces import GPTInterface, VLM_BLIP, VLM_GroundingDino
+from utils.habitat_utils import setup_sim_config
 
-
-# This is the scene we are going to load, support a variety of mesh formats, such as .glb, .gltf, .obj, .ply
-test_scene = "/home/zhanxin/Desktop/SceneGraph/data/scene_datasets/hm3d/val/00800-TEEsavR23oF/TEEsavR23oF.basis.glb"
-
-sim_settings = {
-    "scene": test_scene,  # Scene path
-    "default_agent": 0,  # Index of the default agent
-    "sensor_height": 1.3,  # Height of sensors in meters, relative to the agent
-    "width": 640,  # Spatial resolution of the observations
-    "height": 480,
-}
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 def most_common(lst):
     return max(set(lst), key=lst.count)
@@ -57,22 +31,11 @@ class NavigatorTeleport(Navigator):
 
         self.llm_query_trial = 3
         self.defined_entrance = ['door', 'doorway', 'entrance']
-        # Initialise foundation models used for agent's functions
-        '''
-        self.llm = GPTInterface(config_path=llm_config_path)
-        self.perception = {
-            "object": VLM_GroundingDino(),
-            "vqa": VLM_BLIP()
-        }
-        self.scene_graph_specs = scene_graph_specs
-        self.scene_graph = SceneGraph(scene_graph_specs)
-        self.state_spec = self.scene_graph_specs["state"]
-        self.current_state = {node_type: None for node_type in self.state_spec}
-        self.plan = None
-        self.last_subgoal = None
-        self.is_navigating = False
-        self.goal = None
-        '''
+
+        # Setup simulator
+        sim_config = setup_sim_config()
+        self.sim = habitat_sim.Simulator(sim_config)
+        self.sim_agent = self.sim.initialize_agent(0)
 
     def reset(self):
         self.scene_graph = SceneGraph(self.scene_graph_specs)
@@ -131,37 +94,45 @@ class NavigatorTeleport(Navigator):
     def query_vqa(self, image, prompt):
         return self.perception['vqa'].query(image, prompt)
     
-    def _get_image(self):
+    def _observe(self):
         """
-        Get most recent image from embodied agent. 
-        To be overridden in each Navigator subclass.
-
-        Returns:
-            image: PIL.Image object
-        """
-        raise NotImplementedError
-    
-    def observe(self, obs_rgb):
-        """
-        Generate observations.
+        Get observations from the environment (e.g. render images for
+        an agent in sim, or take images at current location on real robot).
+        To be overridden in subclass.
 
         Return:
-            location: name of current location answered by VQA
-            objects: list of all objects observed in current vicinity
+            images: dict of images taken at current pose
         """
-        image = obs_rgb
-        location = self.query_vqa(image, "Which room is the photo?")
-        location = location.replace(" ", "") #clean space between "living room"
-        # print(f'Entrance Check: {self.query_vqa(image, "Is there a door in the photo?"), self.query_vqa(image, "Is the door in the photo open?")}')
-        
-        if self.query_vqa(image, "Is there a door in the photo?") == 'yes':
-            objects = self.query_objects(image,  self.defined_entrance)
-            # print(f'Update Detection added door: {objects}')
-        else:
-            objects = self.query_objects(image)
+        obs = self.sim.get_sensor_observations()
         return {
-            "location": location,
-            "object": objects
+            'left': cv2.cvtColor(obs['left_rgb'], cv2.COLOR_BGR2RGB),
+            'forward': cv2.cvtColor(obs['forward_rgb'], cv2.COLOR_BGR2RGB),
+            'right': cv2.cvtColor(obs['right_rgb'], cv2.COLOR_BGR2RGB),
+            'rear': cv2.cvtColor(obs['rear_rgb'], cv2.COLOR_BGR2RGB),
+        }
+    
+    def perceive(self, images):
+        image_locations = {}
+        image_objects = {}
+        for label, image in images.items():
+            location = self.query_vqa(image, "Which room is the photo?")
+            image_locations[label] = (
+                location.replace(" ", "") #clean space between "living room"
+            )
+            # print(f'Entrance Check: {self.query_vqa(image, "Is there a door in the photo?"), self.query_vqa(image, "Is the door in the photo open?")}')
+            
+            if self.query_vqa(image, "Is there a door in the photo?") == 'yes':
+                objects = self.query_objects(image,  self.defined_entrance)
+                # print(f'Update Detection added door: {objects}')
+            else:
+                objects = self.query_objects(image)
+            image_objects[label] = objects
+
+        # TODO: Implement some reasonable fusion across all images
+
+        return {
+            "location": image_locations[0],
+            "object": image_objects[0]
         }
     
     def generate_query(self, discript, goal, query_type):
@@ -399,79 +370,49 @@ class NavigatorTeleport(Navigator):
         """
         raise NotImplementedError
 
-# This function generates a config for the simulator.
-# It contains two parts:
-# one for the simulator backend
-# one for the agent, where you can attach a bunch of sensors
-def make_simple_cfg(settings):
-    # simulator backend
-    sim_cfg = habitat_sim.SimulatorConfiguration()
-    sim_cfg.scene_id = settings["scene"]
 
-    # agent
-    agent_cfg = habitat_sim.agent.AgentConfiguration()
+if __name__ == "__main__":
+    nav = NavigatorTeleport()
+    goal = 'sink'
 
-    # In the 1st example, we attach only one sensor,
-    # a RGB visual sensor, to the agent
-    rgb_sensor_spec = habitat_sim.CameraSensorSpec()
-    rgb_sensor_spec.uuid = "color_sensor"
-    rgb_sensor_spec.hfov = 120
-    rgb_sensor_spec.sensor_type = habitat_sim.SensorType.COLOR
-    rgb_sensor_spec.resolution = [settings["height"], settings["width"]]
-    rgb_sensor_spec.position = [0.0, settings["sensor_height"], 0.0]
-    agent_cfg.sensor_specifications = [rgb_sensor_spec]
-    return habitat_sim.Configuration(sim_cfg, [agent_cfg])
+    cv2.namedWindow("Viz")
+    img_lang_obs = None
 
+    while True:
+        images = nav._observe()        
 
-cfg = make_simple_cfg(sim_settings)
-sim = habitat_sim.Simulator(cfg)
+        if key == ord('a'):
+            nav.sim_agent.act('turn_left')
+        elif key == ord('d'):
+            nav.sim_agent.act('turn_right')
+        elif key == ord('w'):
+            nav.sim_agent.act('move_forward')
+        elif key == ord('q'):
+            break
+        elif key == ord('o'):
+            img_lang_obs = nav.perceive(images)
+            print('------------  Receive Lang Obs   -------------')
+            print(img_lang_obs)
+        elif key == ord('u'):
+            if img_lang_obs == None:
+                print('Current Obs is None')
+            else:
+                print('------------  Curernt Lang Obs   -------------')
+                location = img_lang_obs['location']
+                obj_lst = img_lang_obs['object'][1]
+                print(f'Location: {location}\nObjecet: {obj_lst}')
+                nav.update_scene_graph(None, img_lang_obs)
+                print('------------  Update Scene Graph   -------------')
+                print(nav.scene_graph.print_scene_graph(pretty=False,skip_object=False))
+        elif key == ord('i'):
+            path = nav.plan_path(goal)
+            print('-------------  Plan Path --------------')
+            print(path)
+        elif key == ord('s'):
+            Image.fromarray(obs['color_sensor']).save('/home/zhanxin/Desktop/SceneGraph/test.png')
+            print('-------------  Plan Path --------------')
 
+        cv2.imshow("Viz", images['forward'])
+        key = cv2.waitKey(0)
 
-TURN_DEGREE = 10.0
-
-agent = sim.initialize_agent(sim_settings["default_agent"])
-agent.agent_config.action_space["turn_left"].actuation.amount = TURN_DEGREE
-agent.agent_config.action_space["turn_right"].actuation.amount = TURN_DEGREE
-
-nav = NavigatorTeleport()
-goal = 'sink'
-
-cv2.namedWindow("Viz")
-img_lang_obs = None
-
-while True:
-    obs = sim.get_sensor_observations()
-    obs_rgb_cv2 =  cv2.cvtColor(obs['color_sensor'], cv2.COLOR_BGR2RGB) 
-    cv2.imshow("Viz", obs_rgb_cv2)
-    key = cv2.waitKey(0)
-    if key == ord('a'):
-        agent.act('turn_left')
-    elif key == ord('d'):
-        agent.act('turn_right')
-    elif key == ord('w'):
-        agent.act('move_forward')
-    elif key == ord('q'):
-        break
-    elif key == ord('o'):
-        img_lang_obs = nav.observe(Image.fromarray(obs['color_sensor']))
-        print('------------  Receive Lang Obs   -------------')
-        print(img_lang_obs)
-    elif key == ord('u'):
-        if img_lang_obs == None:
-            print('Current Obs is None')
-        else:
-            print('------------  Curernt Lang Obs   -------------')
-            location = img_lang_obs['location']
-            obj_lst = img_lang_obs['object'][1]
-            print(f'Location: {location}\nObjecet: {obj_lst}')
-            nav.update_scene_graph(None, img_lang_obs)
-            print('------------  Update Scene Graph   -------------')
-            print(nav.scene_graph.print_scene_graph(pretty=False,skip_object=False))
-    elif key == ord('i'):
-        path = nav.plan_path(goal)
-        print('-------------  Plan Path --------------')
-        print(path)
-    elif key == ord('s'):
-        Image.fromarray(obs['color_sensor']).save('/home/zhanxin/Desktop/SceneGraph/test.png')
-        print('-------------  Plan Path --------------')
-cv2.destroyAllWindows()
+    cv2.destroyAllWindows()
