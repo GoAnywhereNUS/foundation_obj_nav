@@ -108,18 +108,6 @@ class NavigatorTeleport(Navigator):
             images: dict of images taken at current pose
         """
         obs = self.sim.get_sensor_observations()
-        # print('original',obs['left_rgb'].shape)
-        # print('channel 4',obs['left_rgb'][:,:,3])
-        # print('change', cv2.cvtColor(obs['left_rgb'], cv2.COLOR_BGR2RGB).shape)
-        # print(sum(sum(obs['left_rgb'][:,:,0] == cv2.cvtColor(obs['left_rgb'], cv2.COLOR_BGR2RGB)[:,:,0])))
-        # print(sum(sum(obs['left_rgb'][:,:,1] == cv2.cvtColor(obs['left_rgb'], cv2.COLOR_BGR2RGB)[:,:,1])))
-        # print(sum(sum(obs['left_rgb'][:,:,2] == cv2.cvtColor(obs['left_rgb'], cv2.COLOR_BGR2RGB)[:,:,2])))
-        # return {
-        #     'left': cv2.cvtColor(obs['left_rgb'], cv2.COLOR_BGR2RGB),
-        #     'forward': cv2.cvtColor(obs['forward_rgb'], cv2.COLOR_BGR2RGB),
-        #     'right': cv2.cvtColor(obs['right_rgb'], cv2.COLOR_BGR2RGB),
-        #     'rear': cv2.cvtColor(obs['rear_rgb'], cv2.COLOR_BGR2RGB),
-        # }
         return {
             'left': obs['left_rgb'],
             'forward': obs['forward_rgb'],
