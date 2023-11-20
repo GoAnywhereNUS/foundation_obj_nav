@@ -35,6 +35,7 @@ class NavigatorTeleport(Navigator):
         self.llm_query_trial = 3
         self.defined_entrance = ['door', 'doorway', 'entrance']
         self.explored_node = []
+        self.path = []
 
         # Setup simulator
         sim_config = setup_sim_config()
@@ -212,18 +213,17 @@ class NavigatorTeleport(Navigator):
 
         # TODO: Need panaromic view to estimate state
         
-        # Begin Query LLM to classify detected objects in 'room','entrance' and 'object' 
-        
+        # Deal with multiple rgn sensors
         obj_label = obs['object']['forward'][1] + obs['object']['left'][1] + obs['object']['right'][1] + obs['object']['rear'][1]
         obj_bbox = torch.cat((obs['object']['forward'][0], obs['object']['left'][0], obs['object']['right'][0], obs['object']['rear'][0]), dim=0)
         obs_location = most_common([obs['location']['forward'], obs['location']['left'], obs['location']['right'], obs['location']['rear']])
-        
+        idx_sensordirection = ['forward' for i in range(len(obs['object']['forward'][1]))] + ['left' for i in range(len(obs['object']['left'][1]))] + ['right' for i in range(len(obs['object']['right'][1]))] + ['rear' for i in range(len(obs['object']['rear'][1]))] 
         # Add bbox index into obj label
         obj_label = [f'{item}_{index}' for index, item in enumerate(obj_label)]
         obs_obj_discript = "["+ ", ".join(obj_label) + "]"
         whole_query = self.generate_query(obs_obj_discript, None, 'classify')
 
-        
+        # Query LLM to classify detected objects in 'room','entrance' and 'object' 
         chat_completion = self.llm.query_object_class(whole_query)
         complete_response = chat_completion.choices[0].message.content.lower()
         complete_response = complete_response.replace(" ", "")
@@ -248,7 +248,7 @@ class NavigatorTeleport(Navigator):
         # Update Room Node
         if est_state != None:
             self.current_state = est_state
-            print(f'dExisting node: {self.current_state}')
+            print(f'Existing node: {self.current_state}')
         else:
             self.current_state = self.scene_graph.add_node("room", obs_location, {"image": np.random.rand(4, 4)})
             if self.last_subgoal != None and self.scene_graph.is_type(self.last_subgoal, 'entrance'):
@@ -280,10 +280,12 @@ class NavigatorTeleport(Navigator):
                 
                 if self.current_state[:-2] == entrance_name:
                     continue
-                temp_entrance = self.scene_graph.add_node("entrance", entrance_name, {"image": np.random.rand(4, 4)})
+                temp_entrance = self.scene_graph.add_node("entrance", entrance_name, {"image": obj_bbox[bb_idx]})
                 self.scene_graph.add_edge(self.current_state, temp_entrance, "connects to")
 
-                nearby_bbox_idx = self.get_nearby_bbox(obj_bbox[bb_idx],obj_bbox)
+                sensor_dir = idx_sensordirection[bb_idx] # get the sensor direction for this entrance
+                bbox_in_specific_dir = np.where(np.array(idx_sensordirection) == sensor_dir)[0] # get all objects in the direction
+                nearby_bbox_idx = self.get_nearby_bbox(obj_bbox[bb_idx],obj_bbox[bbox_in_specific_dir,])
                 for idx in nearby_bbox_idx:
                     if idx in bbox_idx_to_obj_name.keys():
                         new_obj = bbox_idx_to_obj_name[idx] 
@@ -362,6 +364,7 @@ class NavigatorTeleport(Navigator):
             if self.scene_graph.is_type(path[1], 'entrance'):
                 self.last_subgoal = path[1]
         logging.warning(f'Path: {path}')
+        self.path = path
         return path
 
     def has_reached_subgoal(self, state, subgoal):
@@ -455,5 +458,8 @@ if __name__ == "__main__":
         elif key == ord('n'):
             print('-------------  Contrl Success --------------')
             nav.explored_node.append(nav.last_subgoal)
+        elif key == ord('m'):
+            print('-------------  Contrl Success --------------')
+            nav.explored_node.append(nav.path[-1])
 
     cv2.destroyAllWindows()
