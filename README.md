@@ -30,4 +30,4 @@ Create folder to download checkpoints into, i.e. `mkdir checkpoints && cd checkp
 - GroundingDINO: `wget https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth`
 - GNM (ViNT): `wget https://drive.google.com/file/d/1ckrceGb5m_uUtq3pD8KHwnqtJgPl6kF5/view?usp=drive_link`
 
-NOTE: No environment setup prepared yet. When manually creating a Python environment, ensure that `transformers==4.26.1`. Older or newer version of `transformers` may cause various issues.
+NOTE: No environment setup prepared yet. When manually creating a Python environment, ensure that `transformers==4.26.1`. Older or newer version of `transformers` may cause various issues. To runn LLAVA, transformers==4.31.0 is required.

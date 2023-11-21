@@ -135,7 +135,6 @@ class NavigatorTeleport(Navigator):
             image_objects[label] = objects
 
         # TODO: Implement some reasonable fusion across all images
-        print(image_locations, image_objects)
         return {
             "location": image_locations,
             "object": image_objects
@@ -216,6 +215,7 @@ class NavigatorTeleport(Navigator):
         # Deal with multiple rgn sensors
         obj_label = obs['object']['forward'][1] + obs['object']['left'][1] + obs['object']['right'][1] + obs['object']['rear'][1]
         obj_bbox = torch.cat((obs['object']['forward'][0], obs['object']['left'][0], obs['object']['right'][0], obs['object']['rear'][0]), dim=0)
+        cropped_imgs = obs['object']['forward'][2] + obs['object']['left'][2] + obs['object']['right'][2] + obs['object']['rear'][2]
         obs_location = most_common([obs['location']['forward'], obs['location']['left'], obs['location']['right'], obs['location']['rear']])
         idx_sensordirection = ['forward' for i in range(len(obs['object']['forward'][1]))] + ['left' for i in range(len(obs['object']['left'][1]))] + ['right' for i in range(len(obs['object']['right'][1]))] + ['rear' for i in range(len(obs['object']['rear'][1]))] 
         # Add bbox index into obj label
@@ -256,7 +256,10 @@ class NavigatorTeleport(Navigator):
                 self.explored_node.append(self.last_subgoal)
             print(f'Add new node: {self.current_state}')
 
-        # TODO: If the replt does not have '_', update fails.
+        room_lst_scene_graph = self.scene_graph.get_secific_type_nodes('room')
+        all_room = [room[:room.index('_')] for room in room_lst_scene_graph]
+        
+        # TODO: If the reply does not have '_', update fails.
         bbox_idx_to_obj_name = {}
         for item in object_lst:
             if item == 'none':
@@ -264,8 +267,11 @@ class NavigatorTeleport(Navigator):
             try:
                 if '_' in item:
                     obj_name = item.split('_')[0]
+                    if obj_name in all_room: # if the object name is the room name, skip it. otherwise the room name may point to object node
+                        continue
                     bb_idx = int(item.split('_')[1])
-                    temp_obj = self.scene_graph.add_node("object", obj_name, {"image": np.random.rand(4, 4)})
+                    sensor_dir = idx_sensordirection[bb_idx]
+                    temp_obj = self.scene_graph.add_node("object", obj_name, {"image": cropped_imgs[bb_idx]})
                     self.scene_graph.add_edge(self.current_state, temp_obj, "contains")
                     bbox_idx_to_obj_name[bb_idx] = temp_obj
             except:
@@ -280,8 +286,11 @@ class NavigatorTeleport(Navigator):
                 
                 if self.current_state[:-2] == entrance_name:
                     continue
-                temp_entrance = self.scene_graph.add_node("entrance", entrance_name, {"image": obj_bbox[bb_idx]})
-                self.scene_graph.add_edge(self.current_state, temp_entrance, "connects to")
+                try:
+                    temp_entrance = self.scene_graph.add_node("entrance", entrance_name, {"image": obj_bbox[bb_idx]})
+                    self.scene_graph.add_edge(self.current_state, temp_entrance, "connects to")
+                except:
+                    pdb.set_trace()
 
                 sensor_dir = idx_sensordirection[bb_idx] # get the sensor direction for this entrance
                 bbox_in_specific_dir = np.where(np.array(idx_sensordirection) == sensor_dir)[0] # get all objects in the direction
@@ -436,7 +445,9 @@ if __name__ == "__main__":
         elif key == ord('o'):
             img_lang_obs = nav.perceive(images)
             print('------------  Receive Lang Obs   -------------')
-            print(img_lang_obs)
+            location = img_lang_obs['location']
+            obj_lst = img_lang_obs['object']
+            print(f'Location: {location}\nObjecet: {obj_lst}')
         elif key == ord('u'):
             if img_lang_obs == None:
                 print('Current Obs is None')

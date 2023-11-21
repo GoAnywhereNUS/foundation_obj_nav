@@ -5,7 +5,7 @@ import functools
 import torch
 import torchvision
 from PIL import Image
-
+import numpy as np
 # GPT
 import openai
 import logging
@@ -26,9 +26,19 @@ tag2text = importlib.import_module("Grounded-Segment-Anything.Tag2Text.models.ta
 inference_ram = importlib.import_module("Grounded-Segment-Anything.Tag2Text.inference_ram")
 sys.path.remove(tag2text_path)
 
+# LLAVA
+try:
+    from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
+    from llava.conversation import conv_templates, SeparatorStyle
+    from llava.model.builder import load_pretrained_model
+    from llava.utils import disable_torch_init
+    from llava.mm_utils import process_images, tokenizer_image_token, get_model_name_from_path, KeywordsStoppingCriteria
+    print('Loading LLAVA')
+except:
+    print('Not Loading LLAVA.')
+
 
 ######## Interface classes ########
-
 class LLMInterface:
     def __init__(self, log_path):
         dirname = os.path.dirname(log_path)
@@ -128,11 +138,11 @@ Sample Answer: None"""
 
 ##############################
 
-CLS_USER_EXAMPLE_1 = """There is a list: ["livingroom_0", "hallway_1", "door_2", "doorway_3", "table_4","chair_5","livingroom sofa_6", "floor_7", "wall_8", "doorway_9"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes."""
+CLS_USER_EXAMPLE_1 = """There is a list: ["livingroom_0", "hallway_1", "door_2", "doorway_3", "table_4","chair_5","livingroom sofa_6", "floor_7", "wall_8", "doorway_9", "stairs_10"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes."""
 
 CLS_AGENT_EXAMPLE_1 = """Sample Answer:
 room: livingroom_0
-entrance: door_2, doorway_3, hallway_1, doorway_9
+entrance: door_2, doorway_3, hallway_1, doorway_9, stairs_10
 object: table_4, chair_5, sofa_6, floor_7, wall_8"""
 
 CLS_USER_EXAMPLE_2 = """There is a list: ["bathroom_0", "bathroom mirror_1","bathroom sink_2","toilet_3", "bathroom bathtub_4", "lamp_5"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes."""
@@ -275,7 +285,54 @@ class VLM_BLIP(VQAPerception):
         ans = self.model.predict_answers(samples=samples, inference_method="generate")
         return ans[0]
     
-    
+class VLM_LLAVA(VQAPerception):
+    def __init__(self):
+        super().__init__()
+        # LLAVA
+        self.model_path = 'liuhaotian/llava-v1.5-7b' # unsure how to change the model path
+        self.model_name = 'llava-v1.5-7b'
+        self.conv_mode = "llava_v1"
+        self.load_4bit = True
+        self.load_8bit = False
+        self.model_base = None
+        self.tokenizer, self.model,  self.image_processor,  self.context_len = load_pretrained_model(self.model_path, self.model_base, self.model_name, self.load_8bit, self.load_4bit, device='cuda') # set decive = self.device cause issues
+        self.conv = conv_templates[self.conv_mode].copy()
+        self.roles = self.conv.roles
+
+    def query(self, image, question_prompt):
+        from transformers import TextStreamer
+        self.reset()
+        image = image.convert("RGB")
+        image_tensor = process_images([image], self.image_processor, self.model.config)
+        image_tensor = image_tensor.to(self.model.device, dtype=torch.float16)
+        if self.model.config.mm_use_im_start_end:
+            inp = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN + '\n' + question_prompt
+        else:
+            inp = DEFAULT_IMAGE_TOKEN + '\n' + question_prompt
+        self.conv.append_message(self.conv.roles[0], inp)
+        self.conv.append_message(self.conv.roles[1], None)
+        prompt = self.conv.get_prompt()
+
+        input_ids = tokenizer_image_token(prompt, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).to(self.model.device)
+        stop_str = self.conv.sep if self.conv.sep_style != SeparatorStyle.TWO else self.conv.sep2
+        keywords = [stop_str]
+        stopping_criteria = KeywordsStoppingCriteria(keywords, self.tokenizer, input_ids)
+        with torch.inference_mode():
+            output_ids = self.model.generate(
+                input_ids,
+                images=image_tensor,
+                do_sample=True,
+                temperature= 0.2,
+                max_new_tokens= 512,
+                use_cache=True,
+                stopping_criteria=[stopping_criteria])
+        outputs = self.tokenizer.decode(output_ids[0, input_ids.shape[1]:]).strip('</s>')
+        self.conv.messages[-1][-1] = outputs
+        return outputs
+
+    def reset(self):
+        self.conv = conv_templates[self.conv_mode].copy()
+
 class VLM_GroundingDino(ObjectPerception):
     def __init__(
         self,
@@ -402,7 +459,12 @@ class VLM_GroundingDino(ObjectPerception):
         boxes_filt = boxes_filt[nms_idx]
         pred_phrases = [pred_phrases[idx] for idx in nms_idx]
         selected_labels = [selected_labels[idx] for idx in nms_idx]
-        return boxes_filt, selected_labels
+        cropeed_obj_lst = []
+        for i in range(len(boxes_filt)):
+            cropped_img = image.crop(np.array(boxes_filt[i]))
+            cropeed_obj_lst.append(cropped_img)
+
+        return boxes_filt, selected_labels, cropeed_obj_lst
 
     def detect_all_objects(self, image):
         return self._detect_objects(image)
@@ -414,17 +476,19 @@ class VLM_GroundingDino(ObjectPerception):
 
 
 if __name__ == "__main__":
-    image = Image.open("test.png")
-
-    #blip = VLM_BLIP()
-    #output = blip.query(image, "Where is the photo taken?")
-    #print(output)
+    import pdb
+    image = Image.open("/home/zhanxin/Desktop/SceneGraph/test.png")
 
     gdino = VLM_GroundingDino()
     boxes, labels = gdino.detect_all_objects(image)
     print(boxes)
     print(labels)
 
+    blip = VLM_BLIP()
+    output = blip.query(image, "Where is the photo taken?")
+    print(output)
+
+    pdb.set_trace()
 
     #### ---------------------   LOCAL EXPLOARATION TEST  -------------------------
     # Notice: add open_ai key config before test
@@ -444,3 +508,17 @@ if __name__ == "__main__":
     # seperate_ans = re.split('\n|; |, | |sample answer:', sample_response)
     # seperate_ans = [i for i in seperate_ans if i != '']
     # print(seperate_ans) # ans should be separate_ans[0]
+    
+    # llava = VLM_LLAVA()
+    # import time
+    # for i in range(10):
+    #     start = time.time()
+    #     output = llava.query(image, "Where is the photo taken? Please reply with one word.")
+    #     print(output)
+    #     end = time.time()
+    #      print('Cost Time:', end-start)
+    #     start = time.time()
+    #     output = llava.query(image, "List objects in the photo with as many details as possible")
+    #     print(output)
+    #     end = time.time()
+    #     print('Cost Time:', end-start)
