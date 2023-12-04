@@ -1,0 +1,5 @@
+sensor_setup: ['forward_rgb', 'forward_depth']
+habitat_data:
+  metadata_path: '/data/home/joel/storage/objectnav/objectnav_hm3d_v2/val_mini/val_mini.json.gz'
+  content_scenes: ["TEEsavR23oF", "wcojb4TFT35"]
+  scenes_dir: "/data/home/joel/storage"
