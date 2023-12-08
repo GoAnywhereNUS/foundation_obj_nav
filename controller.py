@@ -26,7 +26,7 @@ from home_robot.utils.depth import (
     get_point_cloud_from_z_t,
     transform_camera_view_t
 )
-
+import cv2
 
 class Controller:
     def __init__(
@@ -149,7 +149,7 @@ class FMMController(Controller):
         )
         print("Set goal as:", self.set_goal_global)
 
-    def set_subgoal_image(self, subgoal, obs, camera_matrix):
+    def set_subgoal_image(self, subgoal, cam_uuid, obs, camera_matrix):
         """
         Set the subgoal for the controller to plan and track towards.
 
@@ -157,9 +157,9 @@ class FMMController(Controller):
             subgoal: tuple, bounding box of ROI specifying the subgoal in obs, i.e. (min_x, max_x, min_y, max_y)
             obs: observation from the simulator environment
         """
-        min_x, max_x, min_y, max_y = subgoal
+        min_x, min_y, max_x, max_y = subgoal
         depth = torch.tensor(
-            np.transpose(obs['forward_depth'], axes=[2, 0, 1]), 
+            np.transpose(obs[cam_uuid], axes=[2, 0, 1]), 
             device=self.device
         )
 
@@ -193,8 +193,8 @@ class FMMController(Controller):
             plt.savefig('logs/planning/pointcloud.png')
             plt.clf()
 
-            plt.imshow(obs['forward_depth'].squeeze()[min_y:max_y, min_x:max_x])
-            plt.savefig("logs/planning/depth_crop.png")
+            plt.imshow(obs[cam_uuid].squeeze()[min_y:max_y, min_x:max_x])
+            plt.savefig("logs/planning/depth_crop_" + str(cam_uuid) + ".png")
             plt.clf()
 
         min_x, max_x = torch.min(points[:, 0]).item(), torch.max(points[:, 0]).item()
@@ -452,7 +452,6 @@ if __name__ == "__main__":
     config = setup_env_config()
     env = ObjNavEnv(habitat.Env(config=config), config)
     obs = env.reset()
-
     import cv2
     import time
     cv2.namedWindow("Images")
@@ -488,7 +487,8 @@ if __name__ == "__main__":
             controller.set_subgoal_coord([0.5, 0], obs)
         elif key == ord('o'):
             controller.set_subgoal_image(
-                [260, 380, 120, 360],
+                [260, 380, 120, 360], 
+                "forward_depth",
                 obs,
                 get_camera_matrix(640, 480, 90)
             )

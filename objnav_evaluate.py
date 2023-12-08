@@ -4,9 +4,10 @@ import numpy as np
 import re
 from PIL import Image
 import logging
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import torch
-
 
 from navigator import Navigator
 from scene_graph import SceneGraph, default_scene_graph_specs
@@ -15,12 +16,20 @@ import cv2
 import pdb
 import habitat_sim
 
+import math
+from utils.mapper import Mapper
+from utils.fmm_planner import FMMPlanner
+from utils.habitat_utils import ObjNavEnv, setup_env_config
+
+import habitat
+from controller import *
+
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 def most_common(lst):
     return max(set(lst), key=lst.count)
 
-class NavigatorTeleport(Navigator):
+class NavigatorSimulation(Navigator):
     def __init__(
         self,
         scene_graph_specs=default_scene_graph_specs,
@@ -39,10 +48,11 @@ class NavigatorTeleport(Navigator):
         self.path = [] # planned path in scene graph
 
         # Setup simulator
-        sim_config = setup_sim_config()
-        self.sim = habitat_sim.Simulator(sim_config)
-        self.sim_agent = self.sim.initialize_agent(0)
+        config = setup_env_config(default_config_path='configs/objectnav_hm3d_v2_with_semantic.yaml')
+        self.env = ObjNavEnv(habitat.Env(config=config), config)
+        obs = self.env.reset()
 
+        
     def reset(self):
         self.scene_graph = SceneGraph(self.scene_graph_specs)
         self.llm.reset()
@@ -122,7 +132,7 @@ class NavigatorTeleport(Navigator):
         Return:
             images: dict of images taken at current pose
         """
-        obs = self.sim.get_sensor_observations()
+        obs = self.env.get_observation()
         return {
             'left': obs['left_rgb'],
             'forward': obs['forward_rgb'],
@@ -139,11 +149,9 @@ class NavigatorTeleport(Navigator):
             image_locations[label] = (
                 location.replace(" ", "") #clean space between "living room"
             )
-            # print(f'Entrance Check: {self.query_vqa(image, "Is there a door in the photo?"), self.query_vqa(image, "Is the door in the photo open?")}')
-            
+
             if self.query_vqa(image, "Is there a door in the photo?") == 'yes':
                 objects = self.query_objects(image,  self.defined_entrance)
-                # print(f'Update Detection added door: {objects}')
             else:
                 objects = self.query_objects(image)
             image_objects[label] = objects
@@ -157,7 +165,7 @@ class NavigatorTeleport(Navigator):
     def generate_query(self, discript, goal, query_type):
         if query_type == 'plan':
             start_question = "You see the partial layout of the apartment:\n"
-            end_question = f"\nQuestion: Your goal is to find a {goal}. If any of the rooms in the layout are likely to contain the target object, reply the most probable room name, not any door name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found. Follow my format to state reasoning and sample answer."
+            end_question = f"\nQuestion: Your goal is to find a {goal}. If any of the rooms in the layout are likely to contain the target object, reply the most probable room name, not any door name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found. Follow my format to state reasoning and sample answer. Please only use one word in sample answer."
             explored_query = "The following has been explored: " + "["+ ", ".join(self.explored_node) + "]. Please dont reply explored place or object."
             whole_query = start_question + discript + end_question + explored_query
         elif query_type == 'classify':
@@ -205,9 +213,6 @@ class NavigatorTeleport(Navigator):
             for i in indices:
                 similar_room = room_lst_scene_graph[i]
                 similar_room_description = self.scene_graph.get_node_attr(similar_room)['description']
-
-                pdb.set_trace()
-                
                 similar_room_obj = self.scene_graph.get_obj_in_room(similar_room)
                 similar_room_obj_descript = self.query_detailed_descript(similar_room_obj)
                 #TODO: how to decide whether they are the same room? LLM query
@@ -273,6 +278,7 @@ class NavigatorTeleport(Navigator):
 
         print('-------------  State Estimation --------------')
         est_state, room_description = self.estimate_state(obs)
+        
         # Update Room Node
         if est_state != None:
             self.current_state = est_state
@@ -299,11 +305,11 @@ class NavigatorTeleport(Navigator):
             try:
                 if '_' in item:
                     obj_name = item.split('_')[0]
-                    if obj_name in all_room: # if the object name is the room name, skip it. otherwise the room name may point to object node
+                    if obj_name in all_room: # if the object name is also room name, skip it. otherwise the room name may point to object node
                         continue
                     bb_idx = int(item.split('_')[1])
                     sensor_dir = idx_sensordirection[bb_idx]
-                    temp_obj = self.scene_graph.add_node("object", obj_name, {"image": cropped_imgs[bb_idx]})
+                    temp_obj = self.scene_graph.add_node("object", obj_name, {"image": cropped_imgs[bb_idx],"bbox": obj_bbox[bb_idx], "cam_uuid": sensor_dir})
                     self.scene_graph.add_edge(self.current_state, temp_obj, "contains")
                     bbox_idx_to_obj_name[bb_idx] = temp_obj
             except:
@@ -316,21 +322,21 @@ class NavigatorTeleport(Navigator):
                 entrance_name = item.split('_')[0]
                 bb_idx = int(item.split('_')[1])
                 
-                if self.current_state[:-2] == entrance_name:
+                if self.current_state[:-2] == entrance_name: # handle wrong entrance name, (To be deleted).
                     continue
                 try:
-                    temp_entrance = self.scene_graph.add_node("entrance", entrance_name, {"image": obj_bbox[bb_idx]})
+                    sensor_dir = idx_sensordirection[bb_idx] # get the sensor direction for this entrance
+                    temp_entrance = self.scene_graph.add_node("entrance", entrance_name, {"image": cropped_imgs[bb_idx],"bbox": obj_bbox[bb_idx],"cam_uuid": sensor_dir})
                     self.scene_graph.add_edge(self.current_state, temp_entrance, "connects to")
+                    bbox_in_specific_dir = np.where(np.array(idx_sensordirection) == sensor_dir)[0] # get all objects in the direction
+                    nearby_bbox_idx = self.get_nearby_bbox(obj_bbox[bb_idx],obj_bbox[bbox_in_specific_dir,])
+                    for idx in nearby_bbox_idx:
+                        if idx in bbox_idx_to_obj_name.keys():
+                            new_obj = bbox_idx_to_obj_name[idx] 
+                            self.scene_graph.add_edge(temp_entrance, new_obj, "is near")
+
                 except:
                     pdb.set_trace()
-
-                sensor_dir = idx_sensordirection[bb_idx] # get the sensor direction for this entrance
-                bbox_in_specific_dir = np.where(np.array(idx_sensordirection) == sensor_dir)[0] # get all objects in the direction
-                nearby_bbox_idx = self.get_nearby_bbox(obj_bbox[bb_idx],obj_bbox[bbox_in_specific_dir,])
-                for idx in nearby_bbox_idx:
-                    if idx in bbox_idx_to_obj_name.keys():
-                        new_obj = bbox_idx_to_obj_name[idx] 
-                        self.scene_graph.add_edge(temp_entrance, new_obj, "is near")
 
         logging.info(f'Scene Graph: {self.scene_graph.print_scene_graph(pretty=False, skip_object=False)}')
         return est_state
@@ -384,20 +390,21 @@ class NavigatorTeleport(Navigator):
         path = self.scene_graph.plan_shortest_paths(self.current_state, goal_node_name)
 
         # If we are already in the target room, Start local exploration in the room
-        # TODO: maybe later implement to query llm for multiple times.
         if path[-1] == self.current_state:
             self.explored_node.append(self.current_state)
             obj_lst = self.scene_graph.get_obj_in_room(self.current_state)
             sg_obj_Discript = "["+ ", ".join(obj_lst) + "]"
             whole_query = self.generate_query(sg_obj_Discript, goal, 'local')
-
-            chat_completion = self.llm.query_local_explore(whole_query)
-            complete_response = chat_completion.choices[0].message.content.lower()
-            # TODO: handle llm return multiple answers, it will use "sample answers:"
-            sample_response = complete_response[complete_response.find('sample answer:'):]
-            seperate_ans = re.split('\n|; |, | |sample answer:', sample_response)
-            seperate_ans = [i.replace('.','') for i in seperate_ans if i != '']
-            path = seperate_ans # ans should be separate_ans[0]
+            
+            store_ans = []
+            for i in range(self.llm_query_trial):
+                chat_completion = self.llm.query_local_explore(whole_query)
+                complete_response = chat_completion.choices[0].message.content.lower()
+                sample_response = complete_response[complete_response.find('sample answer:'):]
+                seperate_ans = re.split('\n|; |, | |sample answer:', sample_response)
+                seperate_ans = [i.replace('.','') for i in seperate_ans if i != '']
+                store_ans.append(seperate_ans[0]) # ans should be separate_ans[0]
+            path = [most_common(store_ans)]
         
         # if next ubgoal is entrance, we mark it.
         if len(path) > 1:
@@ -408,6 +415,16 @@ class NavigatorTeleport(Navigator):
         self.path = path
         return path
 
+    def ground_plan_to_bbox(self):
+        if len(self.path) > 1:
+            next_goal = self.path[1]
+        else:
+            next_goal = self.path[0]
+        print('Next Subgoal:', next_goal, self.scene_graph.scene_graph[next_goal])
+        next_position = self.scene_graph.get_node_attr(next_goal)['bbox'].type(torch.int64).tolist()
+        cam_uuid = self.scene_graph.get_node_attr(next_goal)['cam_uuid']+'_depth'
+        return next_goal, next_position, cam_uuid
+    
     def has_reached_subgoal(self, state, subgoal):
         raise NotImplementedError
     
@@ -454,34 +471,43 @@ class NavigatorTeleport(Navigator):
         raise NotImplementedError
 
 
-if __name__ == "__main__":
-    nav = NavigatorTeleport()
-    goal = 'sink'
-    # pdb.set_trace()
-    cv2.namedWindow("Viz")
-    pdb.set_trace()
-    img_lang_obs = None
 
+
+if __name__ == "__main__":
+    device = torch.device('cuda:0')
+    controller = FMMController(device)
+    nav = NavigatorSimulation()
+    goal = 'sink'
+    cv2.namedWindow("Images")
+    auto = False
+    import time
     while True:
+        obs = nav.env.get_observation()
+        # Map
+        t1 = time.time()
+        controller.update(obs)
+        print("Mapping:", time.time() - t1, "   Pose:", obs['gps'][0], obs['gps'][1], math.degrees(obs['compass']))
+
+        # Visualise
+        images = controller.visualise(obs)
+        cv2.imshow("Images", images)
         images = nav._observe()
-        display_img = cv2.cvtColor(images['forward'], cv2.COLOR_BGR2RGB) 
-        cv2.imshow("Viz", display_img)        
-        key = cv2.waitKey(0)
+        key = cv2.waitKey(50)
         if key == ord('a'):
-            nav.sim_agent.act('turn_left')
+            nav.env.act('turn_left')
         elif key == ord('d'):
-            nav.sim_agent.act('turn_right')
+            nav.env.act('turn_right')
         elif key == ord('w'):
-            nav.sim_agent.act('move_forward')
+            nav.env.act('move_forward')
         elif key == ord('q'):
             break
-        elif key == ord('o'):
+        elif key == ord('o'):  # Perceive observations
             img_lang_obs = nav.perceive(images)
             print('------------  Receive Lang Obs   -------------')
             location = img_lang_obs['location']
             obj_lst = img_lang_obs['object']
             print(f'Location: {location}\nObjecet: {obj_lst}')
-        elif key == ord('u'):
+        elif key == ord('u'): # Update Scene Graph
             if img_lang_obs == None:
                 print('Current Obs is None')
             else:
@@ -492,33 +518,25 @@ if __name__ == "__main__":
                 nav.update_scene_graph(img_lang_obs)
                 print('------------  Update Scene Graph   -------------')
                 print(nav.scene_graph.print_scene_graph(pretty=False,skip_object=False))
-        elif key == ord('e'):
-            if img_lang_obs == None:
-                print('Current Obs is None')
-            else:
-                print('------------  Curernt Lang Obs   -------------')
-                location = img_lang_obs['location']
-                obj_lst = img_lang_obs['object']
-                print(f'Location: {location}\nObjecet: {obj_lst}')
-                nav.update_scene_graph(img_lang_obs, True)
-        elif key == ord('i'):
-            path = nav.plan_path(goal)
+        elif key == ord('i'): # Planning
             print('-------------  Plan Path --------------')
-            print(path)
-            if len(path) > 1:
-                print('Next Subgoal:',path[1], nav.scene_graph.scene_graph[path[1]])
-            else:
-                print('Next Subgoal:',path[0], nav.scene_graph.scene_graph[path[0]])
-        elif key == ord('s'):
-            print('-------------  Save Obs --------------')
-            Image.fromarray(images['forward']).save('/home/zhanxin/Desktop/SceneGraph/test.png')
+            path = nav.plan_path(goal)
+            next_goal, next_position, cam_uuid = nav.ground_plan_to_bbox()
+            print(f'Path: {path}\n Next Goal: {next_goal}')
+            try:
+                controller.set_subgoal_image(next_position, cam_uuid, obs, get_camera_matrix(640, 480, 90))
+            except:
+                pdb.set_trace()
+            auto = True
         elif key == ord('n'):
             print('-------------  Contrl Success --------------')
             nav.explored_node.append(nav.last_subgoal)
-        elif key == ord('m'):
-            print('-------------  Contrl Success --------------')
-            nav.explored_node.append(nav.path[-1])
-        elif key == ord('f'):
-            print(f'Object Goal {goal} is detected in current obs. Please navigate to the {goal}.')
-
+        if auto:
+                action, stop = controller.step()
+                if stop or action == None:
+                    auto = False
+                    nav.explored_node.append(nav.last_subgoal)
+                else:
+                    print("(Auto) Action:", action)
+                    nav.env.act(action)
     cv2.destroyAllWindows()
