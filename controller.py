@@ -101,7 +101,8 @@ class FMMController(Controller):
         self.visualise_planner = True
         self.visualise_subgoal_selection = False
         self.vis_dir="logs/planning"
-        self.goal_tolerance = np.sqrt(0.25**2 * 2) # ~0.36m
+        self.init_goal_tolerance = 2.0  # tolerance of initially declared goal
+        self.curr_goal_tolerance = 0.5  # tolerance of currently tracking goal
         self.max_goal_search_dist = 1.0
         self.select_subgoal_downsample_depth = 1 # int
 
@@ -157,7 +158,8 @@ class FMMController(Controller):
             subgoal: tuple, bounding box of ROI specifying the subgoal in obs, i.e. (min_x, max_x, min_y, max_y)
             obs: observation from the simulator environment
         """
-        min_x, min_y, max_x, max_y = subgoal
+        # min_x, min_y, max_x, max_y = subgoal
+        min_x, max_x, min_y, max_y = subgoal
         depth = torch.tensor(
             np.transpose(obs[cam_uuid], axes=[2, 0, 1]), 
             device=self.device
@@ -304,7 +306,7 @@ class FMMController(Controller):
                 vis_dir=self.vis_dir,
                 visualize=False,
                 print_images=self.visualise_planner,
-                goal_tolerance=self.goal_tolerance,
+                goal_tolerance=self.curr_goal_tolerance,
             )
 
         curr_goal_local_cell = self.mapper.global_pose_to_local_map_cell(
@@ -317,6 +319,12 @@ class FMMController(Controller):
                 self.set_goal_global, torch.tensor([1.], device=self.device)
             ])
         )
+        # curr_goal_local_cell = self.mapper.global_pose_to_local_map_cell(
+        #     self.curr_tracking_goal_global
+        # )
+        # init_goal_local_cell = self.mapper.global_pose_to_local_map_cell(
+        #     self.set_goal_global
+        # )
         set_goal_pose_cell = self.mapper.global_pose_to_local_map_cell(
             torch.cat([
                 self.set_goal_pose_global, torch.tensor([1.], device=self.device)
@@ -353,17 +361,32 @@ class FMMController(Controller):
 
         self.vis_dist_map = self.planner.fmm_dist
         self.goal_local_cell = curr_goal_local_cell
-        stg_x, stg_y, replan, stop = self.planner.get_short_term_goal(
+        stg_x, stg_y, replan, _ = self.planner.get_short_term_goal(
             curr_grid_pose,
             visualize=False
         )
+
+        # TODO: Currently we compute our own stopping metric and ignore
+        # the inaccurate stop from get_short_term_goal. To be fixed.
+        tracking_goal_dist = torch.norm(
+            self.curr_tracking_goal_global[:2] - torch.tensor([px, py], device=self.device)
+        ).cpu().item()
+        stop = tracking_goal_dist < self.curr_goal_tolerance
 
         if replan:
             # TODO: Handle replanning if too near an obstacle
             print("Replanning...")
 
         if stop:
-            print("Reached goal!")
+            print("Reached tracking goal!")
+
+            init_goal_dist = torch.norm(
+                self.set_goal_global[:2] - torch.tensor([px, py], device=self.device)
+            ).cpu().item()
+            if init_goal_dist > self.init_goal_tolerance:
+                print("Failed to reach near init goal, with dist:", )
+                # TODO: Should we trigger some kind of replanning?
+
             # Reset goal
             self.reset_subgoal()
             
@@ -389,9 +412,14 @@ class FMMController(Controller):
         # action = None
 
         self.subgoal_local_cell = [int(stg_x), int(stg_y)]
-        # print(">>>>")
-        # print("Replan:", replan, "  Stop:", stop)
-        # print("****")
+
+        if self.set_goal_global is not None:
+            init_goal_dist = torch.norm(
+                self.set_goal_global[:2] - torch.tensor([px, py], device=self.device)
+            ).cpu().item()
+        init_goal_dist = None
+
+        print(">>> Dist to init: ", init_goal_dist, "   Dist to tracking: ", tracking_goal_dist)
 
         return action, False
 
@@ -449,15 +477,25 @@ if __name__ == "__main__":
     device = torch.device('cuda:0')
     controller = FMMController(device)
 
-    config = setup_env_config()
+    # config = setup_env_config()
+    config = setup_env_config(default_config_path='configs/objectnav_hm3d_v2_with_semantic.yaml')
     env = ObjNavEnv(habitat.Env(config=config), config)
     obs = env.reset()
+
+    # import habitat_sim
+    # pos = [2.5770767, -0.34942314, 0.0]
+    # ori = habitat_sim.utils.common.quat_from_angle_axis(np.pi, np.array([0, 0, 1]))
+    # env.set_agent_position(pos, ori)
+    # print("Set agent position")
+    # print(env.env.sim.get_agent_state().position)
+
     import cv2
     import time
     cv2.namedWindow("Images")
     auto = False
 
     while True:
+        # print(env.env.sim.get_agent_state().position)
         obs = env.get_observation()
 
         # Map

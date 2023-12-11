@@ -2,6 +2,7 @@ import cv2
 import math
 import torch
 import numpy as np
+from PIL import Image
 
 import home_robot.utils.pose as pu
 import home_robot.utils.visualization as vu

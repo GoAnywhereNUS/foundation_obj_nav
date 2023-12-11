@@ -113,8 +113,6 @@ class FMMPlanner:
             goal_x, goal_y = ret
             updated_goal = ret
 
-        print("~~~", goal_x, goal_y)
-
         traversible_ma[goal_x, goal_y] = 0
         dd = skfmm.distance(traversible_ma, dx=1)
         dd = ma.filled(dd, np.max(dd) + 1)

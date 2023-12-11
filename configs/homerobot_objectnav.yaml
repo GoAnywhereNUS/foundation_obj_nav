@@ -1,4 +1,4 @@
-sensor_setup: ['forward_rgb', 'forward_depth']
+sensor_setup: ['left_rgb', 'forward_rgb', 'right_rgb', 'rear_rgb', 'left_depth', 'forward_depth', 'right_depth', 'rear_depth']
 habitat_data:
   metadata_path: '/data/home/joel/storage/objectnav/objectnav_hm3d_v2/val_mini/val_mini.json.gz'
   content_scenes: ["TEEsavR23oF", "wcojb4TFT35"]
