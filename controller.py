@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from utils.mapper import Mapper
 from utils.fmm_planner import FMMPlanner
-from utils.habitat_utils import ObjNavEnv, setup_env_config
+from utils.habitat_utils import ObjNavEnv, setup_env_config, sensor_config_dict
 
 import habitat
 import skimage
@@ -14,6 +14,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 import home_robot.utils.pose as pu
+import home_robot.utils.rotation as ru
 from home_robot.core.interfaces import (
     ContinuousNavigationAction,
     DiscreteNavigationAction,
@@ -24,7 +25,7 @@ from home_robot.utils.geometry import (
 from home_robot.utils.depth import (
     get_camera_matrix,
     get_point_cloud_from_z_t,
-    transform_camera_view_t
+    transform_camera_view_t,
 )
 import cv2
 
@@ -155,17 +156,24 @@ class FMMController(Controller):
         Set the subgoal for the controller to plan and track towards.
 
         Input:
-            subgoal: tuple, bounding box of ROI specifying the subgoal in obs, i.e. (min_x, max_x, min_y, max_y)
+            subgoal: tuple, bounding box of ROI specifying the subgoal in obs, i.e. (min_x, min_y, max_x, max_y)
             obs: observation from the simulator environment
         """
-        # min_x, min_y, max_x, max_y = subgoal
-        min_x, max_x, min_y, max_y = subgoal
+        min_x, min_y, max_x, max_y = subgoal
         depth = torch.tensor(
             np.transpose(obs[cam_uuid], axes=[2, 0, 1]), 
             device=self.device
         )
+        sensor_config = sensor_config_dict[cam_uuid]
+        _, sensor_yaw, _ = sensor_config.orientation
 
         # Get point cloud from depth map
+        # TODO: Since the Habitat API provides different functions
+        # to transform cloud based on pitch and yaw angles, we 
+        # decompose the transformations into yaw (transform_pose_t)
+        # --> pitch (transform_camera_view_t). This works because
+        # currently pitch angle is always 0. This may not be correct
+        # in other situations. To review and fix.
         point_cloud_t = get_point_cloud_from_z_t(
             depth, camera_matrix, self.device, 
             scale=self.select_subgoal_downsample_depth
@@ -177,6 +185,7 @@ class FMMController(Controller):
 
         # Change axes to +X forward, +Y left and +Z up
         points = points[:, [1, 0, 2]] * torch.tensor([1., -1., 1.], device=self.device)
+        points = self._rotate_yaw(points, sensor_yaw) # Account for camera rotation on base
 
         if self.visualise_subgoal_selection:
             fig = plt.figure()
@@ -213,6 +222,13 @@ class FMMController(Controller):
         print("Image subgoal:", subgoal)
 
         self.set_subgoal_coord(subgoal, obs)
+
+    def _rotate_yaw(self, XYZ, yaw_angle):
+        R = ru.get_r_matrix([0.0, 0.0, 1.0], yaw_angle)
+        XYZ = torch.matmul(
+            XYZ.reshape(-1, 3), torch.from_numpy(R).float().transpose(1, 0).to(self.device)
+        ).reshape(XYZ.shape)
+        return XYZ
 
     def reset_subgoal(self):
         self.set_goal_global = None
@@ -525,7 +541,8 @@ if __name__ == "__main__":
             controller.set_subgoal_coord([0.5, 0], obs)
         elif key == ord('o'):
             controller.set_subgoal_image(
-                [260, 380, 120, 360], 
+                # [260, 380, 120, 360],
+                [260, 120, 380, 360],
                 "forward_depth",
                 obs,
                 get_camera_matrix(640, 480, 90)
