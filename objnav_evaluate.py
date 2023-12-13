@@ -4,21 +4,14 @@ import numpy as np
 import re
 from PIL import Image
 import logging
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 import torch
 
 from navigator import Navigator
 from scene_graph import SceneGraph, default_scene_graph_specs
-from utils.habitat_utils import setup_sim_config
 import cv2
 import pdb
-import habitat_sim
 
 import math
-from utils.mapper import Mapper
-from utils.fmm_planner import FMMPlanner
 from utils.habitat_utils import ObjNavEnv, setup_env_config
 
 import habitat
@@ -49,6 +42,7 @@ class NavigatorSimulation(Navigator):
 
         # Setup simulator
         config = setup_env_config(default_config_path='configs/objectnav_hm3d_v2_with_semantic.yaml')
+        self.config = config
         self.env = ObjNavEnv(habitat.Env(config=config), config)
         obs = self.env.reset()
 
@@ -475,8 +469,8 @@ class NavigatorSimulation(Navigator):
 
 if __name__ == "__main__":
     device = torch.device('cuda:0')
-    controller = FMMController(device)
     nav = NavigatorSimulation()
+    controller = FMMController(device, env_config=nav.config)
     goal = 'sink'
     cv2.namedWindow("Images")
     auto = False
