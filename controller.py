@@ -13,6 +13,7 @@ from PIL import Image
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 
 import home_robot.utils.pose as pu
 import home_robot.utils.rotation as ru
@@ -182,7 +183,7 @@ class FMMController(Controller):
         self.step_size = 5
         self.scale = 1.0
         self.visualise_planner = True
-        self.visualise_subgoal_selection = False
+        self.visualise_subgoal_selection = True
         self.vis_dir="logs/planning"
         self.init_goal_tolerance = 2.0  # tolerance of initially declared goal
         self.curr_goal_tolerance = 0.5  # tolerance of currently tracking goal
@@ -278,10 +279,19 @@ class FMMController(Controller):
         points = points[:, [1, 0, 2]] * torch.tensor([1., -1., 1.], device=self.device)
         points = self._rotate_yaw(points, sensor_yaw) # Account for camera rotation on base
 
+        # Get bounding box
+        bb_min_x, bb_max_x = torch.min(points[:, 0]).item(), torch.max(points[:, 0]).item()
+        bb_min_y, bb_max_y = torch.min(points[:, 1]).item(), torch.max(points[:, 1]).item()
+        bb_min_h, bb_max_h = torch.min(points[:, 2]).item(), torch.max(points[:, 2]).item()
+
         if self.visualise_subgoal_selection:
             fig = plt.figure()
             ax = fig.add_subplot(projection='3d')
-            scatter_points = points.cpu().numpy()
+            scatter_points = point_cloud_base_coords[0].reshape(-1, 3)
+            scatter_points = scatter_points[:, [1, 0, 2]] * torch.tensor([1., -1., 1.], device=self.device)
+            scatter_points = self._rotate_yaw(scatter_points, sensor_yaw)
+            scatter_points = scatter_points.cpu().numpy()
+            scatter_points_crop = points.cpu().numpy()
             ax.scatter(
                 scatter_points[:, 0], 
                 scatter_points[:, 1], 
@@ -289,27 +299,40 @@ class FMMController(Controller):
                 c=scatter_points[:, 2],
                 cmap=plt.cm.viridis
             )
+            ax.scatter(
+                scatter_points_crop[:, 0], 
+                scatter_points_crop[:, 1], 
+                scatter_points_crop[:, 2],
+                color='red',
+                s=7**2,
+            )
+            ax.scatter(
+                [(bb_max_x - bb_min_x) / 2],
+                [(bb_max_y - bb_min_y) / 2],
+                [(bb_max_h - bb_min_h) / 2],
+                s=12**2,
+                marker='x',
+                color='cyan'
+            )
             ax.set_xlabel('X')
             ax.set_ylabel('Y')
             ax.set_zlabel('Z')
             plt.savefig('logs/planning/pointcloud.png')
             plt.clf()
 
-            plt.imshow(obs[cam_uuid].squeeze()[min_y:max_y, min_x:max_x])
+            plt.imshow(obs[cam_uuid].squeeze())
+            rect = Rectangle((min_x, min_y), max_x - min_x, max_y - min_y, linewidth=2, edgecolor='r', facecolor='none')
+            plt.gca().add_patch(rect)
             plt.savefig("logs/planning/depth_crop_" + str(cam_uuid) + ".png")
             plt.clf()
 
-        min_x, max_x = torch.min(points[:, 0]).item(), torch.max(points[:, 0]).item()
-        min_y, max_y = torch.min(points[:, 1]).item(), torch.max(points[:, 1]).item()
-        min_h, max_h = torch.min(points[:, 2]).item(), torch.max(points[:, 2]).item()
-
         subgoal = [
-            (min_x + max_x) / 2,
-            (min_y + max_y) / 2,
+            (bb_min_x + bb_max_x) / 2,
+            (bb_min_y + bb_max_y) / 2,
         ]
 
         print("### Select image subgoal ###")
-        print("Bounding box:", min_x, max_x, min_y, max_y, min_h, max_h)
+        print("Bounding box:", bb_min_x, bb_max_x, bb_min_y, bb_max_y, bb_min_h, bb_max_h)
         print("Image subgoal:", subgoal)
 
         self.set_subgoal_coord(subgoal, obs)
