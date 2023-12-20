@@ -4,6 +4,9 @@ import numpy as np
 import re
 from PIL import Image
 import logging
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import torch
 
 from navigator import Navigator
@@ -12,10 +15,14 @@ import cv2
 import pdb
 
 import math
+from utils.mapper import Mapper
+from utils.fmm_planner import FMMPlanner
 from utils.habitat_utils import ObjNavEnv, setup_env_config
 
 import habitat
 from controller import *
+
+import random
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -31,11 +38,13 @@ class NavigatorSimulation(Navigator):
         self,
         scene_graph_specs=default_scene_graph_specs,
         llm_config_path="configs/gpt_config.yaml",
+        log_path ='logs/llm_query.log'
     ):
         
         super().__init__(
             scene_graph_specs=scene_graph_specs, 
-            llm_config_path=llm_config_path
+            llm_config_path=llm_config_path,
+            log_path = log_path
         )
 
         self.llm_query_trial = 5
@@ -48,7 +57,6 @@ class NavigatorSimulation(Navigator):
 
         # Setup simulator
         config = setup_env_config(default_config_path='configs/objectnav_hm3d_v2_with_semantic.yaml')
-        self.config = config
         self.env = ObjNavEnv(habitat.Env(config=config), config)
         obs = self.env.reset()
 
@@ -168,6 +176,9 @@ class NavigatorSimulation(Navigator):
                         max_y = np.max(instance_index[:,0])
                         min_x = np.min(instance_index[:,1])
                         max_x = np.max(instance_index[:,1])
+
+                        if (max_x - min_x) * (max_y - min_y) < 5000 and random.uniform(0,1) > 0.2:
+                            continue
                         objlabel_lst.append(instance_label)
                         bbox_lst.append([min_x, min_y, max_x, max_y])
                         cropped_img_lst.append(image.crop(np.array([min_x,min_y,max_x,max_y])))
@@ -206,7 +217,7 @@ class NavigatorSimulation(Navigator):
             whole_query = start_question + discript + end_question + explored_query
         elif query_type == 'classify':
             start_question = "There is a list:"
-            end_question = "Please eliminate redundant strings in the element from the list and classify them into \"room\", \"entrance\", and \"object\" classes. Ignore floor, ceiling and wall. \nSample Answer:"
+            end_question = "Please eliminate redundant strings in the element from the list and classify them into \"room\", \"entrance\", and \"object\" classes. Ignore floor, ceiling and wall. Keep the number in the name. \nSample Answer:"
             whole_query = start_question + discript + end_question
         elif query_type == 'local':
             start_question = "There is a list:"
@@ -276,7 +287,7 @@ class NavigatorSimulation(Navigator):
                     elif 'false'in seperate_ans[0]:
                         store_ans.append(0)
                 print("State Estimation:", store_ans)
-                pdb.set_trace()
+                # pdb.set_trace()
                 is_similar = most_common(store_ans)
                 if is_similar:
                     est_state = similar_room
@@ -552,79 +563,93 @@ class NavigatorSimulation(Navigator):
 
 if __name__ == "__main__":
     device = torch.device('cuda:0')
-    nav = NavigatorSimulation()
-    controller = FMMController(device, env_config=nav.config)
+    controller = FMMController(device)
+
+    logs_folder = 'logs'
+
+    all_folders = [folder for folder in os.listdir(logs_folder) if os.path.isdir(os.path.join(logs_folder, folder))]
+
+    # Filter folders that start with "trial_"
+    trial_folders = [folder for folder in all_folders if folder.startswith("trial_")]
+
+    # Extract the numbers and find the maximum
+    numbers = [int(folder.split("_")[1]) for folder in trial_folders]
+    max_number = max(numbers, default=0)
+    trial = max_number + 1
+
+    trial_folder = os.path.join(logs_folder, 'trial_' + str(trial))
+    if not os.path.exists(trial_folder):
+        os.makedirs(trial_folder)
+
+    llm_log_path = os.path.join(trial_folder, 'llm_query.log')
+    action_log_path = os.path.join(trial_folder, 'action.txt')
     
-    
+    nav = NavigatorSimulation(log_path =llm_log_path)
+
+    # pdb.set_trace()
     import random
-    # v = random.uniform(-1,1)
-    # random_point = nav.env.env._sim.sample_navigable_point()
-    # # nav.env.set_agent_position(random_point, [0.00000, v, 0.00000, (1-v*v)**0.5])
-    # nav.env.set_agent_position([-0.11123, 4.29130, -7.69720],[0.00000, -0.52760, 0.00000, 0.84949])
-    # print(random_point)
-    
-    # for i in random.choice(range(20)):
+    nav.env.reset()
+    nav.env.reset()
+    nav.env.reset()
+    nav.env.reset()
     nav.env.reset()
 
     env_semantic_names = [s.category.name().lower() for s in nav.env.env.sim.semantic_annotations().objects]
     nav.semantic_annotations = env_semantic_names
 
     goal_candidate =['chair', 'couch', 'potted plant', 'bed', 'toilet', 'tv']
-    goal = random.choice(goal_candidate)
+    # goal = random.choice(goal_candidate)
+    goal = 'couch'
     while goal not in env_semantic_names:
         goal = random.choice(goal_candidate)
     print('Goal', goal)
-    pdb.set_trace()
+    
+    with open(action_log_path, 'a') as file:
+        file.write(f'[SCNEN ID]: {nav.env.env.current_episode.scene_id}\n')
+        file.write(f'[GOAL]: {goal}\n')
+        obs = nav.env.get_observation()
+        x = obs['gps'][0]
+        y = obs['gps'][1]
+        z = math.degrees(obs['compass'])
+        file.write(f'[Pos]: {nav.env.env.sim.agents[0].get_state().position} [Rotation]: {nav.env.env.sim.agents[0].get_state().rotation} \n')
+    
     cv2.namedWindow("Images")
     auto = False
     updated = True
+    cv2.waitKey(1)
     import time
+    
+    loop_iter = 0
+
     while True:
         obs = nav.env.get_observation()
-        # Map
         t1 = time.time()
         controller.update(obs)
-        # print("Mapping:", time.time() - t1, "   Pose:", obs['gps'][0], obs['gps'][1], math.degrees(obs['compass']))
-        # Visualise
         images = controller.visualise(obs)
         cv2.imshow("Images", images)
         images = nav._observe()     
-        # pdb.set_trace()   
-        key = cv2.waitKey(50)
-        if key == ord('a'):
-            nav.env.act('turn_left')
-        elif key == ord('d'):
-            nav.env.act('turn_right')
-        elif key == ord('w'):
-            nav.env.act('move_forward')
-        elif key == ord('q'):
-            break
-        elif key == ord('s'):
-            print('-------------  Save Obs --------------')
-            for direction in ['forward', 'left', 'right', 'rear']:
-                semantic_map = obs[direction+'_semantic']
-                for idx, name in enumerate(env_semantic_names):
-                    if name != "door frame":
-                        continue
-                    mask = np.array(semantic_map)
-                    mask[mask != idx] = -1
-                    mask[mask == idx] = 0
-                    mask += 1
-                    cls_pixel_idxes = np.argwhere(mask)
-                    for coord in cls_pixel_idxes:
-                        obs[direction+'_rgb'][coord[0], coord[1]] = [255 ,0 ,0]
-                    Image.fromarray(obs[direction+'_rgb']).save("logs/observation/" +  time.strftime("%Y%m%d%H%M%S") + '_'+ direction + '_GT_frame.png')
-            pdb.set_trace()
+        cv2.waitKey(1)
+        print('Pos', nav.env.env.sim.agents[0].get_state().position)
 
-        elif key == ord('o'):  # Perceive observations
-            print("Pose:", obs['gps'][0], obs['gps'][1], math.degrees(obs['compass']))
+        if auto == False:
+
+            if loop_iter > 30:
+                break
+
+            loop_iter += 1
+            # Observe
+            with open(action_log_path, 'a') as file:
+                file.write(f'--------- Loop {loop_iter} -----------\n')
             img_lang_obs = nav.perceive(images)
             print('------------  Receive Lang Obs   -------------')
             location = img_lang_obs['location']
             obj_lst = img_lang_obs['object']
+        
             print(f'Location: {location}\nObjecet: {obj_lst}')
-            # pdb.set_trace()
-            
+            obj_label_tmp = ['forward'] + img_lang_obs['object']['forward'][1] + ['left'] + img_lang_obs['object']['left'][1] + ['right'] + img_lang_obs['object']['right'][1] + ['rear'] + img_lang_obs['object']['rear'][1]
+
+            with open(action_log_path, 'a') as file:
+                file.write(f'[Obs]: Location: {location}\nObjecet: {obj_label_tmp}\n')
             for direction in ['forward', 'left', 'right', 'rear']:
                 obs_rgb = images[direction]
                 plt.imshow(obs_rgb.squeeze())
@@ -634,85 +659,65 @@ if __name__ == "__main__":
                     min_x, min_y, max_x, max_y = img_lang_obs['object'][direction][0][i]
                     ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
                     ax.text(min_x, min_y, label)
-                plt.savefig("logs/observation/" +  time.strftime("%Y%m%d%H%M%S") + "_" + direction + ".png")
+                plt.savefig(trial_folder + '/'  +  time.strftime("%Y%m%d%H%M%S") + "_" + direction + ".png")
                 plt.clf()
 
-            with open('logs/demo.txt', 'a') as file:
-                # Write content to the file
-                file.write(f"Pose: {obs['gps'][0]}, {obs['gps'][1]}, {math.degrees(obs['compass'])}\n")
-                file.write(f'Location: {location}\nObjecet: {obj_lst}\n')
+            with open(action_log_path, 'a') as file:
+                if goal in obj_label_tmp:
+                    file.write(f'[END]: SUCCESS \n')
+                    break
 
-        elif (most_common(nav.history[-10:]) != most_common(nav.history[-5:]) and (len(nav.history[-10:]) > 5) and (updated)):
-            print("Pose:", obs['gps'][0], obs['gps'][1], math.degrees(obs['compass']))
-            img_lang_obs = nav.perceive(images)
-            print('------------  Receive Lang Obs   -------------')
-            location = img_lang_obs['location']
-            obj_lst = img_lang_obs['object']
+            # Update
 
-            updated =  False
-            print(f'Location: {location}\nObjecet: {obj_lst}')
-            
-            with open('logs/demo.txt', 'a') as file:
-                # Write content to the file
-                file.write(f"Pose: {obs['gps'][0]}, {obs['gps'][1]}, {math.degrees(obs['compass'])}\n")
-                file.write(f'Location: {location}\nObjecet: {obj_lst}\n')
-        elif key == ord('u'): # Update Scene Graph
-            if img_lang_obs == None:
-                print('Current Obs is None')
-            else:
-                print('------------  Curernt Lang Obs   -------------')
-                location = img_lang_obs['location']
-                obj_lst = img_lang_obs['object']
-                print(f'Location: {location}\nObjecet: {obj_lst}')
-                nav.update_scene_graph(img_lang_obs)
-                print('------------  Update Scene Graph   -------------')
-                print(nav.scene_graph.print_scene_graph(pretty=False,skip_object=False))
-        elif key == ord('i'): # Planning
+            nav.update_scene_graph(img_lang_obs)
+            print('------------  Update Scene Graph   -------------')
+            scene_graph_str = nav.scene_graph.print_scene_graph(pretty=False,skip_object=False)
+            print(scene_graph_str)
+
+            with open(action_log_path, 'a') as file:
+                file.write(f'Scene Graph: {scene_graph_str}\n')
+            # Plan
+
             print('-------------  Plan Path --------------')
             path = nav.plan_path(goal)
             next_goal, next_position, cam_uuid = nav.ground_plan_to_bbox()
+            
+            print(f'Path: {path}\n Next Goal: {next_goal}')
+            with open(action_log_path, 'a') as file:
+                file.write(f'Path: {path}, Next Goal: {next_goal}\n')
 
             min_x, min_y, max_x, max_y = next_position
-            # plt.imshow(obs[cam_uuid[:-5]+'rgb'].squeeze()[min_y:max_y, min_x:max_x])
-            # plt.savefig("logs/planning/" +  time.strftime("%Y%m%d%H%M") + "_crop_rgb_" + str(cam_uuid[:-6]) + ".png")
-            # plt.clf()
+
 
             plt.imshow(obs[cam_uuid[:-5]+'rgb'].squeeze())
             ax = plt.gca()
             ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
-            plt.savefig("logs/planning/" +  time.strftime("%Y%m%d%H%M") + "_whole_rgb_" + str(cam_uuid[:-6]) + ".png")
+            plt.savefig(trial_folder + '/'  + str(trial) + time.strftime("%Y%m%d%H%M") + "_chosen_rgb_" + str(cam_uuid[:-6]) + ".png")
             plt.clf()
 
             plt.imshow(obs[cam_uuid[:-5]+'depth'].squeeze())
             ax = plt.gca()
             ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
-            plt.savefig("logs/planning/" +  time.strftime("%Y%m%d%H%M") + "_whole_depth_" + str(cam_uuid[:-6]) + ".png")
+            plt.savefig(trial_folder + '/' +  str(trial) + time.strftime("%Y%m%d%H%M") + "_chosen_depth_" + str(cam_uuid[:-6]) + ".png")
             plt.clf()
 
-            pdb.set_trace()
-            print(f'Path: {path}\n Next Goal: {next_goal}')
-            try:
-                controller.set_subgoal_image(next_position, cam_uuid, obs, get_camera_matrix(640, 480, 90))
-            except:
-                pdb.set_trace()
+            controller.set_subgoal_image(next_position, cam_uuid, obs, get_camera_matrix(640, 480, 90))
             auto = True
-            updated = True
-        elif key == ord('n'):
-            print('-------------  Contrl Success --------------')
-            nav.explored_node.append(nav.last_subgoal)
-        elif key == ord('l'):
-            auto = False
-        if auto:
-                action, stop = controller.step()
-                if stop or action == None:
-                    auto = False
-                    nav.explored_node.append(nav.last_subgoal)
-                else:
-                    print("(Auto) Action:", action)
-                    nav.env.act(action)
-                    current_loc = nav.perceive_location(images)
-                    nav.history.append(current_loc)
-                    print(f'Current Loc: {current_loc}') 
-                with open('logs/demo.txt', 'a') as file:
-                    file.write(f"Pose: {obs['gps'][0]}, {obs['gps'][1]}, {math.degrees(obs['compass'])}\n")
+        # Action
+        else:
+            action, stop = controller.step()
+            if stop or action == None:
+                auto = False
+                nav.explored_node.append(nav.last_subgoal)
+                with open(action_log_path, 'a') as file:
+                    file.write(f"[Action]: Reach the point\n")
+            else:
+                print("(Auto) Action:", action)
+                nav.env.act(action)
+                current_loc = nav.perceive_location(images)
+                nav.history.append(current_loc)
+                print(f'Current Loc: {current_loc}') 
+                with open(action_log_path, 'a') as file:
+                    file.write(f"[Action]: {action}\n")
+                    file.write(f'[Pos]: {nav.env.env.sim.agents[0].get_state().position} [Rotation]: {nav.env.env.sim.agents[0].get_state().rotation} \n')
     cv2.destroyAllWindows()

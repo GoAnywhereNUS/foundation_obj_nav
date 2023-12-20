@@ -34,12 +34,12 @@ class Mapper:
             du_scale=4,
             exp_pred_threshold=1.0,
             map_pred_threshold=1.0,
-            min_obs_height_cm=50,
+            min_obs_height_cm=55,
             min_depth=0.5,              # m
             max_depth=5.0,              # m
         )
 
-        self.mapper = torch.nn.DataParallel(self._mapper)
+        self.mapper = torch.nn.DataParallel(self._mapper, device_ids = [0,2,3])
         self.last_pose = np.zeros(3)
         self.init = False
         self.T_env_flipped_to_global = None

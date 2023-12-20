@@ -390,6 +390,11 @@ class FMMController(Controller):
                 1:
             ] = np.array([255, 255])
             dist_map_vis[dist_map_vis.shape[0] // 2, dist_map_vis.shape[1] // 2, 1] = 255
+            # dist_map_vis[
+            #     self.set_goal_pose_local_cell[0] - 1 : self.set_goal_pose_local_cell[0] + 2,
+            #     self.set_goal_pose_local_cell[1] - 1 : self.set_goal_pose_local_cell[1] + 2,
+            #     :2
+            # ] = np.array([255, 255])
 
             vis_image[50:530, 670:1310] = np.ones((480, 640, 3)) * 255
             dist_map_vis = np.flipud(dist_map_vis)

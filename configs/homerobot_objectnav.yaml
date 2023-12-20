@@ -1,5 +1,6 @@
-sensor_setup: ['left_rgb', 'forward_rgb', 'right_rgb', 'rear_rgb', 'left_depth', 'forward_depth', 'right_depth', 'rear_depth']
+sensor_setup: ['left_rgb', 'forward_rgb', 'right_rgb', 'rear_rgb', 'left_depth', 'forward_depth', 'right_depth', 'rear_depth', 'left_semantic', 'forward_semantic', 'right_semantic', 'rear_semantic']
 habitat_data:
-  metadata_path: '/data/home/joel/storage/objectnav/objectnav_hm3d_v2/val_mini/val_mini.json.gz'
-  content_scenes: ["TEEsavR23oF", "wcojb4TFT35"]
-  scenes_dir: "/data/home/joel/storage"
+  metadata_path: '/home/zhanxin/foundation_obj_nav/data/val/val.json.gz'
+  # content_scenes: ["TEEsavR23oF", "wcojb4TFT35", "HaxA7YrQdEC", "k1cupFYWXJ6", "svBbv1Pavdk"]
+  content_scenes: ["svBbv1Pavdk"]
+  scenes_dir: "/home/zhanxin/foundation_obj_nav/data/scene_datasets"

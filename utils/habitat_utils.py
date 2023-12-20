@@ -8,13 +8,22 @@ from habitat.config.default import get_config, get_agent_config
 from habitat.config.default_structured_configs import (
     HabitatSimRGBSensorConfig,
     HabitatSimDepthSensorConfig,
+    HabitatSimSemanticSensorConfig,
     ThirdRGBSensorConfig,
     ThirdDepthSensorConfig,
+    # HeadPanopticSensorConfig,    
 )
 
 from gym import spaces
 
 ActType = TypeVar("ActType")
+
+from dataclasses import dataclass
+@dataclass
+class ThirdSemanticSensorConfig(HabitatSimSemanticSensorConfig):
+    uuid: str = "third_semantic"
+    width: int = 256
+    height: int = 256
 
 sensor_config_dict = {
             # 'forward_rgb': HabitatSimRGBSensorConfig(
@@ -25,6 +34,44 @@ sensor_config_dict = {
             #     sensor_subtype="PINHOLE",
             #     hfov=90
             # ),
+            # Smemantic
+            'left_semantic': ThirdSemanticSensorConfig(
+                height=480,
+                width=640,
+                position=[0, 0.88, 0],
+                orientation=[0, np.pi/2, 0],
+                sensor_subtype="PINHOLE",
+                hfov=90,
+                uuid="left_semantic",
+            ),
+            'forward_semantic': ThirdSemanticSensorConfig(
+                height=480,
+                width=640,
+                position=[0, 0.88, 0],
+                orientation=[0, 0, 0],
+                sensor_subtype="PINHOLE",
+                hfov=90,
+                uuid="forward_semantic",
+            ),
+            'right_semantic': ThirdSemanticSensorConfig(
+                height=480,
+                width=640,
+                position=[0, 0.88, 0],
+                orientation=[0, -np.pi/2, 0],
+                sensor_subtype="PINHOLE",
+                hfov=90,
+                uuid="right_semantic",
+            ),
+            'rear_semantic': ThirdSemanticSensorConfig(
+                height=480,
+                width=640,
+                position=[0, 0.88, 0],
+                orientation=[0,  -np.pi, 0],
+                sensor_subtype="PINHOLE",
+                hfov=90,
+                uuid="rear_semantic",
+            ),
+            # RGB
             'left_rgb': ThirdRGBSensorConfig(
                 height=480,
                 width=640,

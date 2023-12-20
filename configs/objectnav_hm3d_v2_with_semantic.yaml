@@ -19,10 +19,11 @@ habitat:
           semantic_sensor:
             width: 640
             height: 480
-            hfov: 79
+            hfov: 90
             position: [0, 0.88, 0]
+            orientation: [0, 0, 0]
         height: 0.88
-        radius: 0.1
+        radius: 0.05
     habitat_sim_v0:
       gpu_device_id: 0
       allow_sliding: False

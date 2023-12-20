@@ -138,14 +138,14 @@ Sample Answer: None"""
 
 ##############################
 
-CLS_USER_EXAMPLE_1 = """There is a list: ["livingroom_0", "hallway_1", "door_2", "doorway_3", "table_4","chair_5","livingroom sofa_6", "floor_7", "wall_8", "doorway_9", "stairs_10"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes."""
+CLS_USER_EXAMPLE_1 = """There is a list: ["livingroom_0", "hallway_1", "window_13","door_2", "door frame_18", "doorway_3", "table_4","chair_5","livingroom sofa_6", "floor_7", "wall_8", "doorway_9", "stairs_10"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes. Ignore floor, ceiling and wall."""
 
 CLS_AGENT_EXAMPLE_1 = """Sample Answer:
 room: livingroom_0
-entrance: door_2, doorway_3, hallway_1, doorway_9, stairs_10
-object: table_4, chair_5, sofa_6, floor_7, wall_8"""
+entrance: door_2, doorway_3, hallway_1, doorway_9, stairs_10, door frame_18
+object: table_4, chair_5, sofa_6, window_13"""
 
-CLS_USER_EXAMPLE_2 = """There is a list: ["bathroom_0", "bathroom mirror_1","bathroom sink_2","toilet_3", "bathroom bathtub_4", "lamp_5"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes."""
+CLS_USER_EXAMPLE_2 = """There is a list: ["bathroom_0", "bathroom mirror_1","bathroom sink_2","toilet_3", "bathroom bathtub_4", "lamp_5", "ceiling_10"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes. Ignore floor, ceiling and wall."""
 
 CLS_AGENT_EXAMPLE_2 = """Sample Answer:
 room: bathroom_0
@@ -153,17 +153,43 @@ entrance: none
 object: mirror_1, sink_2, toilet_3, bathtub_4, lamp_5"""
 #############################
 
-LOCAL_EXP_USER_EXAMPLE_1 = """There is a list: ["mirror", "lamp", "picture", "tool","toilet","sofa", "floor", "wall"]. Please select one object that is most likely located near a sink."""
+LOCAL_EXP_USER_EXAMPLE_1 = """There is a list: ["mirror_2", "lamp_1", "picture_7", "tool_6","toilet_8","sofa_11", "floor_12", "wall_13"]. Please select one object that is most likely located near a sink."""
 
 LOCAL_EXP_AGENT_EXAMPLE_1 = """Reasoning: Among the given options, the object most likely located near a sink is a "mirror." Mirrors are commonly found near sinks in bathrooms for personal grooming and hygiene activities.
-Sample Answer: mirror"""
+Sample Answer: mirror_2"""
 
-LOCAL_EXP_USER_EXAMPLE_2 = """There is a list: ["chair", "sofa", "bed", "dresser","ceiling","closet", "window", "wall"]. Please select one object that is most likely located near a table."""
+LOCAL_EXP_USER_EXAMPLE_2 = """There is a list: ["chair_4", "sofa_2", "bed_9", "dresser_1","ceiling_6","closet_5", "window_7", "wall_10"]. Please select one object that is most likely located near a table."""
 
 LOCAL_EXP_AGENT_EXAMPLE_2 = """Reasoning: Among the given options, the object most likely located near a table is a "chair." Chairs are commonly placed around tables for seating during various activities such as dining, working, or socializing.
-Sample Answer: chair"""
+Sample Answer: chair_4"""
 
 #######################
+
+
+STATE_EST_USER_EXAMPLE_1 = """Description1: On the left, I can see a brown wood headboard, white paper pillow. On the right, I can see a black metal television, gray plastic laundry basket, white wood closet dresser, brown wood drawer. In fron of me, I can see a white wood bed, white wood window, brown metal lamp, brown wood dresser, brown wood dresser nightstand, black silk curtain, white plastic curtain, white metal wall lamp, brown wood drawer. Behind me, I can see a brown wood cabinet. 
+Description2: On the left, I can see a white wood door. On the right, I can see a white wood bed, white glass lamp, white glass window, white plastic curtain, brown wood dresser nightstand, white glass window, white wood nightstand, blue fabric curtain, white cotton pillow, white metal ceiling fan, silver metal wall lamp. Forward, I can see a white glass lamp, brown wood headboard, white cotton pillow, brown wood dresser, white wood bed, white cotton pillow, red metal wall lamp door, brown wood drawer. Behind me, I can see a brown wood bureau, black glass television, brown wood stool, brown wood drawer, brown wood drawer, brown wood drawer.
+These are depictions of what I observe from two different vantage points. Please assess the shared objects, spatial relationship and potenrial errors in the descriptions to determine whether these two positions are indeed in the same place. Provide a response of True or False, along with supporting reasons.
+"""
+STATE_EST_AGENT_EXAMPLE_1 = """Reasoning: Shared Large Objects: the two descriptions exhibit significant commonalities, prominently featuring large and easily observable items such as a brown wood dresser, a brown wood drawer, a white wood bed, a metal wall lamp, a television, and a brown wood headboard. Spatial Relationship: the spatial relationships within both descriptions remain consistent, with the dresser and wall lamp positioned near the bed in each scenario. Potential for Small Errors: Despite minor variations in the color or material of smaller objects like stools or curtains, these discrepancies appear more likely to stem from observational nuances rather than indicating distinct rooms. 
+Sample Answer: True"""
+
+STATE_EST_USER_EXAMPLE_2 = """Description1: On the left, there is a silver metal faucet, white glass mirror, black metal wall lamp, white stainless steel sink, white formica countertop, blue plastic accessory, white wood white door, silver metal faucet, white metal wall lamp, brown wood cabinet, black wood white door doorway, brown wood cabinet, white wood mirror wall. On the right, there is a brown tile floor, white drywall ceiling. Forward, there is a silver metal faucet, silver glass mirror, white soap soap, white porcelain sink, brown wood cabinet, white porcelain sink, silver metal wall lamp, silver metal wall lamp. At the rear, there is an orange glass lamp, brown wood floor, white porcelain tub, white cotton bed.
+Description2:  On the left, there is a white glass mirror, silver metal faucet, white porcelain sink, white wood bathroom sink, white wood bed, brown metal wall lamp. On the right, there are no specified items. In front of me, there is a silver metal faucet, white porcelain sink, white plastic toiletry, silver glass mirror, blue plastic soap toiletry, white white bathroom sink countertop, blue metal wall lamp, black wood bathroom cabinet, black metal wall lamp. Behind me, there is a white porcelain tub, black cloth curtain, white cotton bed, brown wood bed, black cloth curtain, white porcelain bath.
+These are depictions of what I observe from two different vantage points. Please assess the shared objects, spatial relationship and potenrial errors in the descriptions to determine whether these two positions are indeed in the same place. Provide a response of True or False, along with supporting reasons.
+"""
+
+STATE_ESTP_AGENT_EXAMPLE_2 = """Reasoning: Shared Large Objects: Both descriptions mention silver metal faucets, white beds, and brown wood cabinets, contributing to a consistent thematic presence. Spatial Relationship: The placement of key items like silver metal faucets and brown wood cabinets described in similar configurations create a sense of coherence. Potential for Small Errors: Description 2 lacks specified items, such as accessory, door and countertop. Besides, there are small errors in the material of bed. Errors in material or color, as well as the potential omission of small-size objects, can indeed be attributed to variations in observation. Despite this, the two descriptions are depicting the same room, with the potential for small errors accounting for minor variations.
+Sample Answer: True"""
+
+STATE_EST_USER_EXAMPLE_3 = """Description1: On the left, there is a white wood dresser, white glass lamp, and a white glass window/door. On the right, there is a white wood chair and a silver metal wall lamp. In front of me, there is an incomplete description. Behind me, there is a purple wood bed, yellow wood ceiling fan, white wood dresser, and another white glass window.
+Description2:  On the left, there is a white glass mirror, silver metal faucet, white porcelain sink, white wood bathroom sink, white wood bed, brown metal wall lamp. On the right, there are no specified items. In front of me, there is a silver metal faucet, white porcelain sink, white plastic toiletry, silver glass mirror, blue plastic soap toiletry, white white bathroom sink countertop, blue metal wall lamp, black wood bathroom cabinet, black metal wall lamp. Behind me, there is a white porcelain tub, black cloth curtain, white cotton bed, brown wood bed, black cloth curtain, white porcelain bath.
+TThese are depictions of what I observe from two different vantage points. Please assess the shared objects, spatial relationship and potenrial errors in the descriptions to determine whether these two positions are indeed in the same place. Provide a response of True or False, along with supporting reasons.
+"""
+
+STATE_ESTP_AGENT_EXAMPLE_3 = """Reasoning: Shared Large Objects: Both descriptions feature common large objects, including a wood bed and a silver metal wall lamp, though the color of bed is different. Spatial Relationships: Despite variations in surrounding details, the consistent mention of a white wood bed suggests a shared spatial context, possibly from different viewpoints within the same room. Potential for Small Errors: Minor differences, such as color variations in the bed, may be attributed to observational nuances rather than indicating distinct rooms, reinforcing the likelihood of the same room.
+Sample Answer: True"""
+#######################
+
 
 class GPTInterface(LLMInterface):
     def __init__(
@@ -213,7 +239,7 @@ class GPTInterface(LLMInterface):
         self.chat.append(
             {"role": "user", "content": string}
         )
-        print('PLAN MESSGAE', string)
+        # print('PLAN MESSGAE', string)
 
         response = self.client.chat.completions.create(
             model=self.config["model_type"],
@@ -234,7 +260,7 @@ class GPTInterface(LLMInterface):
             {"role": "assistant", "content": LOCAL_EXP_AGENT_EXAMPLE_2},
             {"role": "user", "content": string}
         ]
-        print('LOCAL MESSGAE', string)
+        # print('LOCAL MESSGAE', string)
         response = self.client.chat.completions.create(
             model=self.config["model_type"],
             messages=local_exp_query,
@@ -254,7 +280,7 @@ class GPTInterface(LLMInterface):
             {"role": "assistant", "content": CLS_AGENT_EXAMPLE_2},
             {"role": "user", "content": string}
         ]
-        print('CLASSIFY MESSGAE', string)
+        # print('CLASSIFY MESSGAE', string)
         response = self.client.chat.completions.create(
             model=self.config["model_type"],
             messages=chat_query_obj,
@@ -265,6 +291,27 @@ class GPTInterface(LLMInterface):
         logging.info(f'CLASSIFY REPLY MESSAGE: {log_reply}')
         return response
 
+    def query_state_estimation(self, string):
+        chat_query = [
+            {"role": "system", "content": self.config["setup_message"]},
+            {"role": "user", "content": STATE_EST_USER_EXAMPLE_1},
+            {"role": "assistant", "content": STATE_EST_USER_EXAMPLE_1},
+            {"role": "user", "content": STATE_EST_USER_EXAMPLE_2},
+            {"role": "assistant", "content": STATE_ESTP_AGENT_EXAMPLE_2},
+            {"role": "user", "content": STATE_EST_USER_EXAMPLE_3},
+            {"role": "assistant", "content": STATE_ESTP_AGENT_EXAMPLE_3},
+            {"role": "user", "content": string}
+        ]
+        # print('CLASSIFY MESSGAE', string)
+        response = self.client.chat.completions.create(
+            model=self.config["model_type"],
+            messages=chat_query,
+            seed=self.config["seed"]
+        )
+        logging.info(f'STATE EST MESSAGE: {chat_query}')
+        log_reply =  response.choices[0].message.content.replace("\n", ";")
+        logging.info(f'STATE EST MESSAGE: {log_reply}')
+        return response
 
 class VLM_BLIP(VQAPerception):
     def __init__(self):
@@ -477,18 +524,38 @@ class VLM_GroundingDino(ObjectPerception):
 
 if __name__ == "__main__":
     import pdb
-    image = Image.open("/home/zhanxin/Desktop/SceneGraph/test.png")
+    # image = Image.open("/home/zhanxin/foundation_obj_nav/room_test3.png")
 
-    gdino = VLM_GroundingDino()
-    boxes, labels = gdino.detect_all_objects(image)
-    print(boxes)
-    print(labels)
+    # gdino = VLM_GroundingDino()
+    # boxes, labels = gdino.detect_all_objects(image)
+    # print(boxes)
+    # print(labels)
 
-    blip = VLM_BLIP()
-    output = blip.query(image, "Where is the photo taken?")
-    print(output)
+    # blip = VLM_BLIP()
+    # output = blip.query(image, "Separate the image into its upper half and lower half. Is the upper half of the image in the same room as the lower half?")
+    # print(output)
 
-    pdb.set_trace()
+    llm_config_path="configs/gpt_config.yaml"
+    llm = GPTInterface(config_path=llm_config_path)
+
+    import re
+    discript1 = "Description 1: On the left, there is nothing. On the right, there is nothing. In front of me, there is a white wood stool and a brown tile floor. Behind me, there is a purple cotton bed, a white glass window, a white Lego dresser, a white metal wall lamp, a white metal lamp, a white glass window, a blue drywall wall, and another white glass window.\n"
+    # discript2 = "Description 2: On the left, there is purple wood bed, black metal walllamp, purple and white cotton pillow, white glass window, white metal ceilingfan. On the right, there is white glass window, brown wood cart. On the forward, there is . On the rear, there is purple cotton bed, white glass window, white glass window, black metal walllamp\n"
+    # discript2 = "Description 2: On the left, there is nothing. On the right, there is nothing. In front of me, there is a wood stool and a tiled floor. Behind me, there is a violet bed, a white glass window, a cream dresser, a white wall lamp, a white metal lamp, a white glass window, a blue wall, and another white glass window.\n"
+    # discript2 = "Description 2: On the left, there is nothing. On the right, there is nothing. In front of me, there is a tiled floor and a wood stool. Behind me, there is a violet bed, a white glass window, a white wall lamp, a cream dresser, a white metal lamp, a blue wall, a white glass window, and another white glass window.\n"
+    discript2 = "Description 2: On the left, there is nothing. On the right, there is a book. In front of me, there is a wood stool. Behind me, there is a purple violet bed, a white glass window, a white wall lamp, a stool, a cream dresser, a white metal lamp, a blue wall, and a white glass window.\n"
+   
+    # discript2 = discript1
+    question = "These are depictions of what I observe from two different vantage points. Please assess the shared objects, spatial relationship and potenrial errors in the descriptions to determine whether these two positions are indeed in the same place. Provide a response of True or False, along with supporting reasons. If you cannot decide, reply reasoning and answer None in sample answer."
+    whole_query = discript1 + discript2 + question
+    chat_completion = llm.query_state_estimation(whole_query)
+    complete_response = chat_completion.choices[0].message.content.lower()
+    sample_response = complete_response[complete_response.find('sample answer:'):]
+    seperate_ans = re.split('\n|; |, | |sample answer:', sample_response)
+    seperate_ans = [i.replace('.','') for i in seperate_ans if i != '']
+
+    print(complete_response); import sys; sys.exit(0)
+    # pdb.set_trace()
 
     #### ---------------------   LOCAL EXPLOARATION TEST  -------------------------
     # Notice: add open_ai key config before test
