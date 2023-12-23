@@ -40,19 +40,8 @@ except:
 
 ######## Interface classes ########
 class LLMInterface:
-    def __init__(self, log_path):
-        dirname = os.path.dirname(log_path)
-        try:
-            os.makedirs(dirname, exist_ok=True)
-        except FileNotFoundError:
-            if dirname != "":
-                raise Exception("Directory creation error! " + str(dirname))
-
-        logging.basicConfig(
-            filename=log_path, 
-            level=logging.INFO, 
-            format='%(asctime)s | %(levelname)s: %(message)s'
-        )
+    def __init__(self):
+        self.log_path = None
 
     def reset(self):
         """
@@ -195,11 +184,10 @@ class GPTInterface(LLMInterface):
     def __init__(
         self,
         key_path="configs/openai_api_key.yaml",
-        config_path="configs/gpt_config.yaml",
-        log_path ='logs/llm_query.log'
+        config_path="configs/gpt_config.yaml"
         ):
 
-        super().__init__(log_path)
+        super().__init__()
 
         with open(key_path, 'r') as f:
             key_dict = yaml.safe_load(f)
@@ -221,7 +209,37 @@ class GPTInterface(LLMInterface):
             {"role": "assistant", "content": AGENT_EXAMPLE_4}
         ]
 
+        logs_folder = 'logs'
+
+        all_folders = [folder for folder in os.listdir(logs_folder) if os.path.isdir(os.path.join(logs_folder, folder))]
+
+        # Filter folders that start with "trial_"
+        trial_folders = [folder for folder in all_folders if folder.startswith("trial_")]
+
+        # Extract the numbers and find the maximum
+        numbers = [int(folder.split("_")[1]) for folder in trial_folders]
+        max_number = max(numbers, default=0)
+        trial_folder = os.path.join(logs_folder, 'trial_' + str(max_number))
+        log_path = os.path.join(trial_folder, 'llm_query.log')
+        
+        self.log_path = log_path
+
     def reset(self):
+        logs_folder = 'logs'
+
+        all_folders = [folder for folder in os.listdir(logs_folder) if os.path.isdir(os.path.join(logs_folder, folder))]
+
+        # Filter folders that start with "trial_"
+        trial_folders = [folder for folder in all_folders if folder.startswith("trial_")]
+
+        # Extract the numbers and find the maximum
+        numbers = [int(folder.split("_")[1]) for folder in trial_folders]
+        max_number = max(numbers, default=0)
+        trial_folder = os.path.join(logs_folder, 'trial_' + str(max_number))
+        log_path = os.path.join(trial_folder, 'llm_query.log')
+        self.log_path = log_path
+
+    def query(self, string):
         self.chat = [
             {"role": "system", "content": self.config["setup_message"]},
             {"role": "user", "content": USER_EXAMPLE_1},
@@ -233,9 +251,6 @@ class GPTInterface(LLMInterface):
             {"role": "user", "content": USER_EXAMPLE_4},
             {"role": "assistant", "content": AGENT_EXAMPLE_4}
         ]
-
-    def query(self, string):
-        self.reset()
         self.chat.append(
             {"role": "user", "content": string}
         )
@@ -246,9 +261,10 @@ class GPTInterface(LLMInterface):
             messages=self.chat,
             seed=self.config["seed"]
         )
-        logging.info(f'PLAN QUERY MESSAGE: {self.chat}')
-        log_reply =  response.choices[0].message.content.replace("\n", ";")
-        logging.info(f'PLAN REPLY MESSAGE: {log_reply}')
+        with open(self.log_path, 'a') as file:
+            file.write(f'[PLAN QUERY MESSAGE]: {self.chat}\n')
+            log_reply =  response.choices[0].message.content.replace("\n", ";")
+            file.write(f'[PLAN REPLY MESSAGE]: {log_reply}\n')
         return response
     
     def query_local_explore(self, string):
@@ -266,9 +282,11 @@ class GPTInterface(LLMInterface):
             messages=local_exp_query,
             seed=self.config["seed"]
         )
-        logging.info(f'LOCAL QUERY MESSAGE: {local_exp_query}')
-        log_reply =  response.choices[0].message.content.replace("\n", ";")
-        logging.info(f'LOCAL REPLY MESSAGE: {log_reply}')
+    
+        with open(self.log_path, 'a') as file:
+            file.write(f'[LOCAL QUERY MESSAGE]: {local_exp_query}\n')
+            log_reply =  response.choices[0].message.content.replace("\n", ";")
+            file.write(f'[LOCAL REPLY MESSAGE]: {log_reply}\n')
         return response
 
     def query_object_class(self, string):
@@ -286,9 +304,10 @@ class GPTInterface(LLMInterface):
             messages=chat_query_obj,
             seed=self.config["seed"]
         )
-        logging.info(f'CLASSIFY QUERY MESSAGE: {chat_query_obj}')
-        log_reply =  response.choices[0].message.content.replace("\n", ";")
-        logging.info(f'CLASSIFY REPLY MESSAGE: {log_reply}')
+        with open(self.log_path, 'a') as file:
+            file.write(f'[CLASSIFY QUERY MESSAGE]: {chat_query_obj}\n')
+            log_reply =  response.choices[0].message.content.replace("\n", ";")
+            file.write(f'[CLASSIFY REPLY MESSAGE]: {log_reply}\n')
         return response
 
     def query_state_estimation(self, string):
@@ -308,9 +327,10 @@ class GPTInterface(LLMInterface):
             messages=chat_query,
             seed=self.config["seed"]
         )
-        logging.info(f'STATE EST MESSAGE: {chat_query}')
-        log_reply =  response.choices[0].message.content.replace("\n", ";")
-        logging.info(f'STATE EST MESSAGE: {log_reply}')
+        with open(self.log_path, 'a') as file:
+            file.write(f'[STATE EST QUERY MESSAGE]: {chat_query}\n')
+            log_reply =  response.choices[0].message.content.replace("\n", ";")
+            file.write(f'[STATE EST REPLY MESSAGE]: {log_reply}\n')
         return response
 
 class VLM_BLIP(VQAPerception):
@@ -532,30 +552,53 @@ if __name__ == "__main__":
     # print(labels)
 
     # blip = VLM_BLIP()
-    # output = blip.query(image, "Separate the image into its upper half and lower half. Is the upper half of the image in the same room as the lower half?")
+    # output = blip.query(image, "Which room is the photo?")
     # print(output)
 
-    llm_config_path="configs/gpt_config.yaml"
-    llm = GPTInterface(config_path=llm_config_path)
+    # folder_path = "/home/zhanxin/foundation_obj_nav/data/rls_tour_fisheye"
 
-    import re
-    discript1 = "Description 1: On the left, there is nothing. On the right, there is nothing. In front of me, there is a white wood stool and a brown tile floor. Behind me, there is a purple cotton bed, a white glass window, a white Lego dresser, a white metal wall lamp, a white metal lamp, a white glass window, a blue drywall wall, and another white glass window.\n"
-    # discript2 = "Description 2: On the left, there is purple wood bed, black metal walllamp, purple and white cotton pillow, white glass window, white metal ceilingfan. On the right, there is white glass window, brown wood cart. On the forward, there is . On the rear, there is purple cotton bed, white glass window, white glass window, black metal walllamp\n"
-    # discript2 = "Description 2: On the left, there is nothing. On the right, there is nothing. In front of me, there is a wood stool and a tiled floor. Behind me, there is a violet bed, a white glass window, a cream dresser, a white wall lamp, a white metal lamp, a white glass window, a blue wall, and another white glass window.\n"
-    # discript2 = "Description 2: On the left, there is nothing. On the right, there is nothing. In front of me, there is a tiled floor and a wood stool. Behind me, there is a violet bed, a white glass window, a white wall lamp, a cream dresser, a white metal lamp, a blue wall, a white glass window, and another white glass window.\n"
-    discript2 = "Description 2: On the left, there is nothing. On the right, there is a book. In front of me, there is a wood stool. Behind me, there is a purple violet bed, a white glass window, a white wall lamp, a stool, a cream dresser, a white metal lamp, a blue wall, and a white glass window.\n"
+    # # List all files in the folder
+    # files = os.listdir(folder_path) # file name list
+    # import matplotlib.pyplot as plt
+    # # Read and process each image
+    # for image_file in files:
+    #     image_path = os.path.join(folder_path, image_file)
+    #     image = Image.open(image_path)
+    #     output = blip.query(image, "Which room is the photo?")
+    #     boxes, labels, _ = gdino.detect_all_objects(image)
+    #     plt.imshow(image)
+    #     ax = plt.gca()
+        
+    #     for i in range(len(labels)):
+    #         label = labels[i]
+    #         min_x, min_y, max_x, max_y = boxes[i]
+    #         ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
+    #         ax.text(min_x, min_y, label)
+    #     plt.savefig(os.path.join(folder_path, image_file[:-4] + "_" + output + ".png") )
+    #     plt.clf()
+
+
+    # llm_config_path="configs/gpt_config.yaml"
+    # llm = GPTInterface(config_path=llm_config_path)
+
+    # import re
+    # discript1 = "Description 1: On the left, there is nothing. On the right, there is nothing. In front of me, there is a white wood stool and a brown tile floor. Behind me, there is a purple cotton bed, a white glass window, a white Lego dresser, a white metal wall lamp, a white metal lamp, a white glass window, a blue drywall wall, and another white glass window.\n"
+    # # discript2 = "Description 2: On the left, there is purple wood bed, black metal walllamp, purple and white cotton pillow, white glass window, white metal ceilingfan. On the right, there is white glass window, brown wood cart. On the forward, there is . On the rear, there is purple cotton bed, white glass window, white glass window, black metal walllamp\n"
+    # # discript2 = "Description 2: On the left, there is nothing. On the right, there is nothing. In front of me, there is a wood stool and a tiled floor. Behind me, there is a violet bed, a white glass window, a cream dresser, a white wall lamp, a white metal lamp, a white glass window, a blue wall, and another white glass window.\n"
+    # # discript2 = "Description 2: On the left, there is nothing. On the right, there is nothing. In front of me, there is a tiled floor and a wood stool. Behind me, there is a violet bed, a white glass window, a white wall lamp, a cream dresser, a white metal lamp, a blue wall, a white glass window, and another white glass window.\n"
+    # discript2 = "Description 2: On the left, there is nothing. On the right, there is a book. In front of me, there is a wood stool. Behind me, there is a purple violet bed, a white glass window, a white wall lamp, a stool, a cream dresser, a white metal lamp, a blue wall, and a white glass window.\n"
    
-    # discript2 = discript1
-    question = "These are depictions of what I observe from two different vantage points. Please assess the shared objects, spatial relationship and potenrial errors in the descriptions to determine whether these two positions are indeed in the same place. Provide a response of True or False, along with supporting reasons. If you cannot decide, reply reasoning and answer None in sample answer."
-    whole_query = discript1 + discript2 + question
-    chat_completion = llm.query_state_estimation(whole_query)
-    complete_response = chat_completion.choices[0].message.content.lower()
-    sample_response = complete_response[complete_response.find('sample answer:'):]
-    seperate_ans = re.split('\n|; |, | |sample answer:', sample_response)
-    seperate_ans = [i.replace('.','') for i in seperate_ans if i != '']
+    # # discript2 = discript1
+    # question = "These are depictions of what I observe from two different vantage points. Please assess the shared objects, spatial relationship and potenrial errors in the descriptions to determine whether these two positions are indeed in the same place. Provide a response of True or False, along with supporting reasons. If you cannot decide, reply reasoning and answer None in sample answer."
+    # whole_query = discript1 + discript2 + question
+    # chat_completion = llm.query_state_estimation(whole_query)
+    # complete_response = chat_completion.choices[0].message.content.lower()
+    # sample_response = complete_response[complete_response.find('sample answer:'):]
+    # seperate_ans = re.split('\n|; |, | |sample answer:', sample_response)
+    # seperate_ans = [i.replace('.','') for i in seperate_ans if i != '']
 
-    print(complete_response); import sys; sys.exit(0)
-    # pdb.set_trace()
+    # print(complete_response); import sys; sys.exit(0)
+    # # pdb.set_trace()
 
     #### ---------------------   LOCAL EXPLOARATION TEST  -------------------------
     # Notice: add open_ai key config before test

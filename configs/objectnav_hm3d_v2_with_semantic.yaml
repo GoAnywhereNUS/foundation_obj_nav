@@ -10,6 +10,9 @@ defaults:
 habitat:
   environment:
     max_episode_steps: 500
+    iterator_options:
+      shuffle: False
+      cycle: False
 
   simulator:
     turn_angle: 10

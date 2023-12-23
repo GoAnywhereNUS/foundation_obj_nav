@@ -6,12 +6,11 @@ class Navigator:
     def __init__(
         self, 
         scene_graph_specs=default_scene_graph_specs,
-        llm_config_path="configs/gpt_config.yaml",
-        log_path ='logs/llm_query.log'
+        llm_config_path="configs/gpt_config.yaml"
     ):
 
         # Initialise foundation models used for agent's functions
-        self.llm = GPTInterface(config_path=llm_config_path, log_path=log_path)
+        self.llm = GPTInterface(config_path=llm_config_path)
         self.perception = {
             "object": VLM_GroundingDino(),
             "vqa": VLM_BLIP()
