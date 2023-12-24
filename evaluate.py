@@ -335,7 +335,7 @@ class NavigatorSimulation(Navigator):
                 complete_response = chat_completion.choices[0].message.content.lower()
                 complete_response = complete_response.replace(" ", "")
                 seperate_ans = re.split('\n|,|:', complete_response)
-                seperate_ans = [i.replace('.','') for i in seperate_ans if i != '']   
+                seperate_ans = [i.replace('.','') for i in seperate_ans if i != ''] 
 
                 room_idx = seperate_ans.index('room')
                 entrance_idx = seperate_ans.index('entrance')
@@ -614,7 +614,6 @@ def create_log_folder(log_folder = 'logs'):
 
 if __name__ == "__main__":
 
-
     test_scene = ['00800-TEEsavR23oF', '00802-wcojb4TFT35', '00813-svBbv1Pavdk', '00814-p53SfW6mjZe', '00820-mL8ThkuaVTM', 
                   '00824-Dd4bFSTQ8gi', '00829-QaLdnwvtxbs', '00832-qyAac8rV8Zk', '00835-q3zU7Yy5E5s', '00839-zt1RVoi7PcG', 
                   '00843-DYehNKdT76V', '00848-ziup5kvtCCR', '00853-5cdEh9F2hJL', '00873-bxsVRursffK', '00876-mv2HUxq3B53', 
@@ -646,176 +645,175 @@ if __name__ == "__main__":
         # import pdb
         # pdb.set_trace()
 
-        try:
-            test_history.append( nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id )
-            controller = FMMController(device, env_config=nav.config)
+        test_history.append( nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id )
+        controller = FMMController(device, env_config=nav.config)
 
-            env_semantic_names = [s.category.name().lower() for s in nav.env.env.sim.semantic_annotations().objects]
-            env_semantic_names = ['sofa' if x == 'couch' else x for x in env_semantic_names]
-            env_semantic_names = ['toilet' if x == 'toilet seat' else x for x in env_semantic_names]
+        env_semantic_names = [s.category.name().lower() for s in nav.env.env.sim.semantic_annotations().objects]
+        env_semantic_names = ['sofa' if x == 'couch' else x for x in env_semantic_names]
+        env_semantic_names = ['toilet' if x == 'toilet seat' else x for x in env_semantic_names]
 
-            nav.semantic_annotations = env_semantic_names
+        print(nav.env.env.sim.semantic_annotations().objects)
+        print("******")
+        print(env_semantic_names)
 
-            goal = nav.env.env.current_episode.object_category
-            if goal not in env_semantic_names:
-                if goal == 'tv_monitor':
-                    goal = 'tv'
+        nav.semantic_annotations = env_semantic_names
 
-            # goal_candidate =['chair', 'couch', 'plant', 'bed', 'toilet', 'tv']
-            # # goal = random.choice(goal_candidate)
-            # goal = 'couch'
-            # while goal not in env_semantic_names:
-            #     goal = random.choice(goal_candidate)
-            # print('Goal', goal)
-            
-            with open(action_log_path, 'a') as file:
-                file.write(f'[EPISODE ID]: {nav.env.env.current_episode.episode_id}\n')
-                file.write(f'[SCNEN ID]: {nav.env.env.current_episode.scene_id}\n')
-                file.write(f'[GOAL]: {goal}\n')
-                obs = nav.env.get_observation()
-                x = obs['gps'][0]
-                y = obs['gps'][1]
-                z = math.degrees(obs['compass'])
-                file.write(f'[Pos]: {nav.env.env.sim.agents[0].get_state().position} [Rotation]: {nav.env.env.sim.agents[0].get_state().rotation} \n')
-            
-            cv2.namedWindow("Images")
-            auto = False
-            updated = True
+        goal = nav.env.env.current_episode.object_category
+        if goal not in env_semantic_names:
+            if goal == 'tv_monitor':
+                goal = 'tv'
+
+        # goal_candidate =['chair', 'couch', 'plant', 'bed', 'toilet', 'tv']
+        # # goal = random.choice(goal_candidate)
+        # goal = 'couch'
+        # while goal not in env_semantic_names:
+        #     goal = random.choice(goal_candidate)
+        # print('Goal', goal)
+        
+        with open(action_log_path, 'a') as file:
+            file.write(f'[EPISODE ID]: {nav.env.env.current_episode.episode_id}\n')
+            file.write(f'[SCNEN ID]: {nav.env.env.current_episode.scene_id}\n')
+            file.write(f'[GOAL]: {goal}\n')
+            obs = nav.env.get_observation()
+            x = obs['gps'][0]
+            y = obs['gps'][1]
+            z = math.degrees(obs['compass'])
+            file.write(f'[Pos]: {nav.env.env.sim.agents[0].get_state().position} [Rotation]: {nav.env.env.sim.agents[0].get_state().rotation} \n')
+        
+        cv2.namedWindow("Images")
+        auto = False
+        updated = True
+        cv2.waitKey(1)
+        import time
+        
+        loop_iter = 0
+        step = 0
+
+        while True:
+            obs = nav.env.get_observation()
+            t1 = time.time()
+            controller.update(obs)
+            images = controller.visualise(obs)
+            cv2.imshow("Images", images)
+            images = nav._observe()     
             cv2.waitKey(1)
-            import time
+            print('Pos', nav.env.env.sim.agents[0].get_state().position)
+
+            if auto == False:
+
+                if loop_iter > 30 or step > 600:
+                    with open(action_log_path, 'a') as file:
+                        file.write(f"[END]: FAIL\n")
+                    break
+
+                loop_iter += 1
+                # Observe
+                with open(action_log_path, 'a') as file:
+                    file.write(f'--------- Loop {loop_iter} -----------\n')
+                img_lang_obs = nav.perceive(images)
+                print('------------  Receive Lang Obs   -------------')
+                location = img_lang_obs['location']
+                obj_lst = img_lang_obs['object']
             
-            loop_iter = 0
-            step = 0
+                print(f'Location: {location}\nObjecet: {obj_lst}')
+                obj_label_tmp = ['forward'] + img_lang_obs['object']['forward'][1] + ['left'] + img_lang_obs['object']['left'][1] + ['right'] + img_lang_obs['object']['right'][1] + ['rear'] + img_lang_obs['object']['rear'][1]
 
-            while True:
-                obs = nav.env.get_observation()
-                t1 = time.time()
-                controller.update(obs)
-                images = controller.visualise(obs)
-                cv2.imshow("Images", images)
-                images = nav._observe()     
-                cv2.waitKey(1)
-                print('Pos', nav.env.env.sim.agents[0].get_state().position)
+                with open(action_log_path, 'a') as file:
+                    file.write(f'[Obs]: Location: {location}\nObjecet: {obj_label_tmp}\n')
+                for direction in ['forward', 'left', 'right', 'rear']:
+                    obs_rgb = images[direction]
+                    plt.imshow(obs_rgb.squeeze())
+                    ax = plt.gca()
+                    for i in range(len(img_lang_obs['object'][direction][1])):
+                        label = img_lang_obs['object'][direction][1][i]
+                        min_x, min_y, max_x, max_y = img_lang_obs['object'][direction][0][i]
+                        ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
+                        ax.text(min_x, min_y, label)
+                    plt.savefig(trial_folder + '/'  +  time.strftime("%Y%m%d%H%M%S") + "_" + direction + ".png")
+                    plt.clf()
 
-                if auto == False:
+                # Update
+                nav.update_scene_graph(img_lang_obs)
+                print('------------  Update Scene Graph   -------------')
+                scene_graph_str = nav.scene_graph.print_scene_graph(pretty=False,skip_object=False)
+                print(scene_graph_str)
 
-                    if loop_iter > 30 or step > 600:
+                with open(action_log_path, 'a') as file:
+                    file.write(f'Scene Graph: {scene_graph_str}\n')
+
+                # Plan
+                print('-------------  Plan Path --------------')
+                path = nav.plan_path(goal)
+                next_goal, next_position, cam_uuid = nav.ground_plan_to_bbox()
+                
+                print(f'Path: {path}\n Next Goal: {next_goal}')
+                with open(action_log_path, 'a') as file:
+                    file.write(f'Path: {path}, Next Goal: {next_goal}\n')
+
+                min_x, min_y, max_x, max_y = next_position
+
+                plt.imshow(obs[cam_uuid[:-5]+'rgb'].squeeze())
+                ax = plt.gca()
+                ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
+                plt.savefig(trial_folder + '/'  + time.strftime("%Y%m%d%H%M") + "_chosen_rgb_" + str(cam_uuid[:-6]) + ".png")
+                plt.clf()
+
+                plt.imshow(obs[cam_uuid[:-5]+'depth'].squeeze())
+                ax = plt.gca()
+                ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
+                plt.savefig(trial_folder + '/'  + time.strftime("%Y%m%d%H%M") + "_chosen_depth_" + str(cam_uuid[:-6]) + ".png")
+                plt.clf()
+
+                controller.set_subgoal_image(next_position, cam_uuid, obs, get_camera_matrix(640, 480, 90))
+                auto = True
+                
+            # Action
+            else:
+                action, stop = controller.step()
+                if stop or action == None:
+                    auto = False
+                    nav.explored_node.append(nav.last_subgoal)
+                    img_lang_obs = nav.perceive(images)
+                    location = img_lang_obs['location']
+                    obj_lst = img_lang_obs['object']
+                    obj_label_tmp = ['forward'] + img_lang_obs['object']['forward'][1] + ['left'] + img_lang_obs['object']['left'][1] + ['right'] + img_lang_obs['object']['right'][1] + ['rear'] + img_lang_obs['object']['rear'][1]
+                    succeed_flag = False
+                    with open(action_log_path, 'a') as file:
+                        file.write(f"[Action]: Reach the point\n")
+                        for obj in obj_label_tmp:
+                            if goal in obj:
+                                file.write(f"[END]: SUCCESS\n")
+                                succeed_flag = True
+                                for direction in ['forward', 'left', 'right', 'rear']:
+                                    obs_rgb = images[direction]
+                                    plt.imshow(obs_rgb.squeeze())
+                                    ax = plt.gca()
+                                    for i in range(len(img_lang_obs['object'][direction][1])):
+                                        label = img_lang_obs['object'][direction][1][i]
+                                        min_x, min_y, max_x, max_y = img_lang_obs['object'][direction][0][i]
+                                        if goal in label:
+                                            ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='red', facecolor=(0,0,0,0), lw=2))
+                                        else:
+                                            ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
+                                        ax.text(min_x, min_y, label)
+                                    plt.savefig(trial_folder + '/'  +  time.strftime("%Y%m%d%H%M%S") + "_" + direction + "end.png")
+                                    plt.clf()
+                                break
+                    if succeed_flag:
+                        break
+                else:
+                    print("(Auto) Action:", action)
+                    nav.env.act(action)
+                    step += 1
+
+                    if step > 600:
                         with open(action_log_path, 'a') as file:
                             file.write(f"[END]: FAIL\n")
                         break
-
-                    loop_iter += 1
-                    # Observe
+                    current_loc = nav.perceive_location(images)
+                    nav.history.append(current_loc)
+                    print(f'Current Loc: {current_loc}') 
                     with open(action_log_path, 'a') as file:
-                        file.write(f'--------- Loop {loop_iter} -----------\n')
-                    img_lang_obs = nav.perceive(images)
-                    print('------------  Receive Lang Obs   -------------')
-                    location = img_lang_obs['location']
-                    obj_lst = img_lang_obs['object']
-                
-                    print(f'Location: {location}\nObjecet: {obj_lst}')
-                    obj_label_tmp = ['forward'] + img_lang_obs['object']['forward'][1] + ['left'] + img_lang_obs['object']['left'][1] + ['right'] + img_lang_obs['object']['right'][1] + ['rear'] + img_lang_obs['object']['rear'][1]
-
-                    with open(action_log_path, 'a') as file:
-                        file.write(f'[Obs]: Location: {location}\nObjecet: {obj_label_tmp}\n')
-                    for direction in ['forward', 'left', 'right', 'rear']:
-                        obs_rgb = images[direction]
-                        plt.imshow(obs_rgb.squeeze())
-                        ax = plt.gca()
-                        for i in range(len(img_lang_obs['object'][direction][1])):
-                            label = img_lang_obs['object'][direction][1][i]
-                            min_x, min_y, max_x, max_y = img_lang_obs['object'][direction][0][i]
-                            ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
-                            ax.text(min_x, min_y, label)
-                        plt.savefig(trial_folder + '/'  +  time.strftime("%Y%m%d%H%M%S") + "_" + direction + ".png")
-                        plt.clf()
-                    # Update
-
-                    nav.update_scene_graph(img_lang_obs)
-                    print('------------  Update Scene Graph   -------------')
-                    scene_graph_str = nav.scene_graph.print_scene_graph(pretty=False,skip_object=False)
-                    print(scene_graph_str)
-
-                    with open(action_log_path, 'a') as file:
-                        file.write(f'Scene Graph: {scene_graph_str}\n')
-                    # Plan
-
-                    print('-------------  Plan Path --------------')
-                    path = nav.plan_path(goal)
-                    next_goal, next_position, cam_uuid = nav.ground_plan_to_bbox()
-                    
-                    print(f'Path: {path}\n Next Goal: {next_goal}')
-                    with open(action_log_path, 'a') as file:
-                        file.write(f'Path: {path}, Next Goal: {next_goal}\n')
-
-                    min_x, min_y, max_x, max_y = next_position
-
-
-                    plt.imshow(obs[cam_uuid[:-5]+'rgb'].squeeze())
-                    ax = plt.gca()
-                    ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
-                    plt.savefig(trial_folder + '/'  + time.strftime("%Y%m%d%H%M") + "_chosen_rgb_" + str(cam_uuid[:-6]) + ".png")
-                    plt.clf()
-
-                    plt.imshow(obs[cam_uuid[:-5]+'depth'].squeeze())
-                    ax = plt.gca()
-                    ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
-                    plt.savefig(trial_folder + '/'  + time.strftime("%Y%m%d%H%M") + "_chosen_depth_" + str(cam_uuid[:-6]) + ".png")
-                    plt.clf()
-
-                    controller.set_subgoal_image(next_position, cam_uuid, obs, get_camera_matrix(640, 480, 90))
-                    auto = True
-                # Action
-                else:
-                    action, stop = controller.step()
-                    if stop or action == None:
-                        auto = False
-                        nav.explored_node.append(nav.last_subgoal)
-                        img_lang_obs = nav.perceive(images)
-                        location = img_lang_obs['location']
-                        obj_lst = img_lang_obs['object']
-                        obj_label_tmp = ['forward'] + img_lang_obs['object']['forward'][1] + ['left'] + img_lang_obs['object']['left'][1] + ['right'] + img_lang_obs['object']['right'][1] + ['rear'] + img_lang_obs['object']['rear'][1]
-                        succeed_flag = False
-                        with open(action_log_path, 'a') as file:
-                            file.write(f"[Action]: Reach the point\n")
-                            for obj in obj_label_tmp:
-                                if goal in obj:
-                                    file.write(f"[END]: SUCCESS\n")
-                                    succeed_flag = True
-                                    for direction in ['forward', 'left', 'right', 'rear']:
-                                        obs_rgb = images[direction]
-                                        plt.imshow(obs_rgb.squeeze())
-                                        ax = plt.gca()
-                                        for i in range(len(img_lang_obs['object'][direction][1])):
-                                            label = img_lang_obs['object'][direction][1][i]
-                                            min_x, min_y, max_x, max_y = img_lang_obs['object'][direction][0][i]
-                                            if goal in label:
-                                                ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='red', facecolor=(0,0,0,0), lw=2))
-                                            else:
-                                                ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
-                                            ax.text(min_x, min_y, label)
-                                        plt.savefig(trial_folder + '/'  +  time.strftime("%Y%m%d%H%M%S") + "_" + direction + "end.png")
-                                        plt.clf()
-                                    break
-                        if succeed_flag:
-                            break
-                    else:
-                        print("(Auto) Action:", action)
-                        nav.env.act(action)
-                        step += 1
-
-                        if step > 600:
-                            with open(action_log_path, 'a') as file:
-                                file.write(f"[END]: FAIL\n")
-                            break
-                        current_loc = nav.perceive_location(images)
-                        nav.history.append(current_loc)
-                        print(f'Current Loc: {current_loc}') 
-                        with open(action_log_path, 'a') as file:
-                            file.write(f"[Action]: {action}\n")
-                            file.write(f'[Pos]: {nav.env.env.sim.agents[0].get_state().position} [Rotation]: {nav.env.env.sim.agents[0].get_state().rotation} \n')
-            cv2.destroyAllWindows()
-        except:
-            with open(action_log_path, 'a') as file:
-                file.write(f"[END]: LLM QUERY ERROR\n")
-            continue
+                        file.write(f"[Action]: {action}\n")
+                        file.write(f'[Pos]: {nav.env.env.sim.agents[0].get_state().position} [Rotation]: {nav.env.env.sim.agents[0].get_state().rotation} \n')
+        cv2.destroyAllWindows()

@@ -94,10 +94,17 @@ class DiscreteRecovery:
         self.prev_map_pose = None
         self.current_mode = "turn"
         self.max_num_turn_steps = 35
+        self.rng = np.random.default_rng(12345)
 
         # State tracking
         self.perturbation_actions = ["move_forward", "move_forward"]
         self.num_turn_steps = 0
+
+    def get_random_turning_action(self):
+        if self.rng.random() < 0.5:
+            return "turn_left"
+        else:
+            return "turn_right"
 
     def get_recovery_action(self, pose):
         if self.prev_map_pose is None:
@@ -143,8 +150,9 @@ class DiscreteRecovery:
         
         # Update flags, action to take based on current mode
         if self.current_mode == "turn":
-            print(">>> Recovery: TURN_LEFT")
-            action, done = "turn_left", False
+            sampled_action = self.get_random_turning_action()
+            action, done = sampled_action, False
+            print(">>> Recovery:", action)
             self.num_turn_steps += 1
         elif self.current_mode == "probe":
             print(">>> Recovery: PROBE FORWARD")
@@ -190,6 +198,7 @@ class FMMController(Controller):
         self.max_goal_search_dist = 1.0
         self.select_subgoal_downsample_depth = 1 # int
         self.perform_recovery = False
+        self.max_num_wandering_steps = None
 
         self.obs_dilation_selem_radius = 2
         self.obs_dilation_selem = skimage.morphology.disk(
@@ -202,12 +211,15 @@ class FMMController(Controller):
         self.set_goal_pose_global = None
 
         # Recovery and tracking of state
-        self.recovering = True
+        self.recovering = False
         self.recovery_heuristic = None
         self.blocked_steps_threshold = 2
         self.num_blocked_steps = 0
         self.prev_action = None
         self.prev_map_pose = None
+        self.min_tracking_goal_dist = np.inf
+        self.min_tracking_goal_dist_step = 0
+        self.num_steps = 0
 
         # Debug
         self.vis_dist_map = None
@@ -359,6 +371,9 @@ class FMMController(Controller):
         self.num_blocked_steps = 0
         self.prev_action = None
         self.prev_map_pose = None
+        self.num_steps = 0
+        self.min_tracking_goal_dist = np.inf
+        self.min_tracking_goal_dist_step = 0
 
     def reset_subgoal(self):
         self.set_goal_global = None
@@ -425,6 +440,7 @@ class FMMController(Controller):
         if self.set_goal_global is None:
             return None, False
 
+        self.num_steps += 1
         obstacle_map = self.mapper.map_state.get_obstacle_map(0)
         
         # Get current pose and long-term goal
@@ -544,6 +560,9 @@ class FMMController(Controller):
             self.curr_tracking_goal_global[:2] - torch.tensor([px, py], device=self.device)
         ).cpu().item()
         stop = tracking_goal_dist < self.curr_goal_tolerance
+        if tracking_goal_dist < self.min_tracking_goal_dist_step:
+            self.min_tracking_goal_dist = 0
+            self.min_tracking_goal_dist_step = self.num_steps
 
         if stop:
             print("Reached tracking goal!")
@@ -564,6 +583,10 @@ class FMMController(Controller):
             # TODO: Unable to find a path to the goal. Need to execute
             # major recovery, probably including clearing the map.
             print("Replanning...")
+
+        if self.max_num_wandering_steps is not None:
+            if self.num_steps - self.min_tracking_goal_dist_step > self.max_num_wandering_steps:
+                return None, False
 
         ego_stg_x, ego_stg_y = [
             int(stg_x) - curr_grid_pose[0],
