@@ -652,10 +652,6 @@ if __name__ == "__main__":
         env_semantic_names = ['sofa' if x == 'couch' else x for x in env_semantic_names]
         env_semantic_names = ['toilet' if x == 'toilet seat' else x for x in env_semantic_names]
 
-        print(nav.env.env.sim.semantic_annotations().objects)
-        print("******")
-        print(env_semantic_names)
-
         nav.semantic_annotations = env_semantic_names
 
         goal = nav.env.env.current_episode.object_category

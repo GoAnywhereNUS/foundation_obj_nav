@@ -90,21 +90,15 @@ class Controller:
         raise NotImplementedError
 
 class DiscreteRecovery:
-    def __init__(self):
+    def __init__(self, turning_action):
         self.prev_map_pose = None
         self.current_mode = "turn"
         self.max_num_turn_steps = 35
-        self.rng = np.random.default_rng(12345)
+        self.turning_action = turning_action
 
         # State tracking
         self.perturbation_actions = ["move_forward", "move_forward"]
         self.num_turn_steps = 0
-
-    def get_random_turning_action(self):
-        if self.rng.random() < 0.5:
-            return "turn_left"
-        else:
-            return "turn_right"
 
     def get_recovery_action(self, pose):
         if self.prev_map_pose is None:
@@ -150,8 +144,7 @@ class DiscreteRecovery:
         
         # Update flags, action to take based on current mode
         if self.current_mode == "turn":
-            sampled_action = self.get_random_turning_action()
-            action, done = sampled_action, False
+            action, done = self.turning_action, False
             print(">>> Recovery:", action)
             self.num_turn_steps += 1
         elif self.current_mode == "probe":
@@ -191,13 +184,14 @@ class FMMController(Controller):
         self.step_size = 5
         self.scale = 1.0
         self.visualise_planner = True
-        self.visualise_subgoal_selection = True
+        self.visualise_subgoal_selection = False
         self.vis_dir="logs/planning"
         self.init_goal_tolerance = 2.0  # tolerance of initially declared goal
         self.curr_goal_tolerance = 0.5  # tolerance of currently tracking goal
         self.max_goal_search_dist = 1.0
         self.select_subgoal_downsample_depth = 1 # int
-        self.perform_recovery = False
+        self.select_subgoal_outlier_threshold = 0.9 # specifies quantile in range [0, 1]
+        self.perform_recovery = True
         self.max_num_wandering_steps = None
 
         self.obs_dilation_selem_radius = 2
@@ -226,6 +220,9 @@ class FMMController(Controller):
         self.goal_local_cell = None
         self.subgoal_local_cell = None
         self.set_goal_pose_local_cell = None
+
+        # Misc
+        self.rng = np.random.default_rng(12345)
 
     def set_subgoal_coord(self, subgoal, obs):
         """
@@ -291,19 +288,44 @@ class FMMController(Controller):
         points = points[:, [1, 0, 2]] * torch.tensor([1., -1., 1.], device=self.device)
         points = self._rotate_yaw(points, sensor_yaw) # Account for camera rotation on base
 
+        centroid = torch.mean(points, dim=0)
+        dists = (points - centroid.view(1, -1)).norm(dim=1)
+        threshold = torch.quantile(dists, self.select_subgoal_outlier_threshold)
+        selected_points = points[dists < threshold]
+        updated_centroid = torch.mean(selected_points, dim=0).cpu().numpy()
+
         # Get bounding box
-        bb_min_x, bb_max_x = torch.min(points[:, 0]).item(), torch.max(points[:, 0]).item()
-        bb_min_y, bb_max_y = torch.min(points[:, 1]).item(), torch.max(points[:, 1]).item()
-        bb_min_h, bb_max_h = torch.min(points[:, 2]).item(), torch.max(points[:, 2]).item()
+        bb_min_x, bb_max_x = torch.min(selected_points[:, 0]).item(), torch.max(selected_points[:, 0]).item()
+        bb_min_y, bb_max_y = torch.min(selected_points[:, 1]).item(), torch.max(selected_points[:, 1]).item()
+        bb_min_h, bb_max_h = torch.min(selected_points[:, 2]).item(), torch.max(selected_points[:, 2]).item()
 
         if self.visualise_subgoal_selection:
             fig = plt.figure()
             ax = fig.add_subplot(projection='3d')
+
+            _, h, w, c = point_cloud_base_coords.shape
+            point_mask = np.ones((h, w), dtype=bool)
+            point_mask[min_y:max_y, min_x:max_x] = False
+
             scatter_points = point_cloud_base_coords[0].reshape(-1, 3)
+            scatter_points = scatter_points[point_mask.flatten()]
             scatter_points = scatter_points[:, [1, 0, 2]] * torch.tensor([1., -1., 1.], device=self.device)
             scatter_points = self._rotate_yaw(scatter_points, sensor_yaw)
             scatter_points = scatter_points.cpu().numpy()
-            scatter_points_crop = points.cpu().numpy()
+
+            scatter_points_crop = selected_points.cpu().numpy()
+            centroid = updated_centroid
+            filtered_points = points[dists > threshold].cpu().numpy()
+
+            np.savez(
+                'logs/planning/clouds.npz',
+                scatter_points_masked=scatter_points,
+                scatter_points_crop=scatter_points_crop,
+                scatter_points_filtered=filtered_points,
+                centroid=updated_centroid,
+                bounds=np.array([bb_min_x, bb_max_x, bb_min_y, bb_max_y, bb_min_h, bb_max_h]),
+            )
+
             ax.scatter(
                 scatter_points[:, 0], 
                 scatter_points[:, 1], 
@@ -319,9 +341,16 @@ class FMMController(Controller):
                 s=7**2,
             )
             ax.scatter(
-                [(bb_max_x - bb_min_x) / 2],
-                [(bb_max_y - bb_min_y) / 2],
-                [(bb_max_h - bb_min_h) / 2],
+                filtered_points[:, 0],
+                filtered_points[:, 1],
+                filtered_points[:, 2],
+                color='magenta',
+                s=7**2,
+            )
+            ax.scatter(
+                [centroid[0]],
+                [centroid[1]],
+                [centroid[2]],
                 s=12**2,
                 marker='x',
                 color='cyan'
@@ -337,11 +366,8 @@ class FMMController(Controller):
             plt.gca().add_patch(rect)
             plt.savefig("logs/planning/depth_crop_" + str(cam_uuid) + ".png")
             plt.clf()
-
-        subgoal = [
-            (bb_min_x + bb_max_x) / 2,
-            (bb_min_y + bb_max_y) / 2,
-        ]
+            
+        subgoal = [updated_centroid[0], updated_centroid[1]]
 
         print("### Select image subgoal ###")
         print("Bounding box:", bb_min_x, bb_max_x, bb_min_y, bb_max_y, bb_min_h, bb_max_h)
@@ -460,7 +486,8 @@ class FMMController(Controller):
                 if self.recovery_heuristic is None:
                     print("Starting recovery!!")
                     self.num_blocked_steps = 0
-                    self.recovery_heuristic = DiscreteRecovery()
+                    sampled_turning_action = self.get_random_turning_action()
+                    self.recovery_heuristic = DiscreteRecovery(sampled_turning_action)
                 
                 action, done, mode = self.recovery_heuristic.get_recovery_action([px, py, po])
 
@@ -701,6 +728,13 @@ class FMMController(Controller):
     
     def _remove_boundary(self, mat: np.ndarray, value=1) -> np.ndarray:
         return mat[value:-value, value:-value]
+    
+    
+    def get_random_turning_action(self):
+        if self.rng.random() < 0.5:
+            return "turn_left"
+        else:
+            return "turn_right"
 
 
 if __name__ == "__main__":
