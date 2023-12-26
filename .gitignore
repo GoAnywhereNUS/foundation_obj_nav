@@ -2,3 +2,5 @@ configs/openai_api_key.yaml
 checkpoints/*
 logs/*
 scenes/*
+data/*
+*.pyc
