@@ -189,7 +189,7 @@ class FMMController(Controller):
         self.curr_goal_tolerance = 0.5  # tolerance of currently tracking goal
         self.max_goal_search_dist = 1.0
         self.select_subgoal_downsample_depth = 1 # int
-        self.perform_recovery = False
+        self.perform_recovery = True
 
         self.obs_dilation_selem_radius = 2
         self.obs_dilation_selem = skimage.morphology.disk(

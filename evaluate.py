@@ -625,6 +625,11 @@ if __name__ == "__main__":
     trial_folder = create_log_folder()
     action_log_path = os.path.join(trial_folder, 'action.txt')
     nav = NavigatorSimulation()
+
+    print("****",[s.category.name().lower() for s in nav.env.env.sim.semantic_annotations().objects])
+    sys.exit(0)
+
+    
     first_time = True
     test_history = []
 
@@ -636,15 +641,14 @@ if __name__ == "__main__":
             action_log_path = os.path.join(trial_folder, 'action.txt')
         # scene_episode_id = nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id
         
-        while nav.env.env.current_episode.episode_id not in ['1'] or ((nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id) in test_history):
+        while nav.env.env.current_episode.episode_id not in ['0'] or ((nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id) in test_history):
             try:
                 print('RESET', nav.env.env.current_episode.episode_id,nav.env.env.current_episode.scene_id )
                 nav.reset()
             except:
                 sys.exit(0)
         
-        # import pdb
-        # pdb.set_trace()
+
 
         try:
             test_history.append( nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id )
@@ -654,6 +658,7 @@ if __name__ == "__main__":
             env_semantic_names = ['sofa' if x == 'couch' else x for x in env_semantic_names]
             env_semantic_names = ['toilet' if x == 'toilet seat' else x for x in env_semantic_names]
 
+            print("****", nav.env.env.sim.semantic_annotations())
             nav.semantic_annotations = env_semantic_names
 
             goal = nav.env.env.current_episode.object_category
