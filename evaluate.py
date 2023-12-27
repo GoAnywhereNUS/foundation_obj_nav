@@ -647,8 +647,8 @@ class NavigatorSimulation(Navigator):
             self.controller.set_subgoal_image(next_position, cam_uuid, obs, get_camera_matrix(640, 480, 90))
             self.is_navigating = True
         else:
-            action, stop = self.controller.step()
-            if stop or action == None:
+            action, success = self.controller.step()
+            if action is None:
                 self.is_navigating = False
                 self.explored_node.append(self.last_subgoal)
                 

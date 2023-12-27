@@ -1,9 +1,5 @@
 sensor_setup: ['left_rgb', 'forward_rgb', 'right_rgb', 'rear_rgb', 'left_depth', 'forward_depth', 'right_depth', 'rear_depth', 'left_semantic', 'forward_semantic', 'right_semantic', 'rear_semantic']
 habitat_data:
-  metadata_path: '/home/zhanxin/foundation_obj_nav/data/val/val.json.gz'
-  # content_scenes: ["TEEsavR23oF", "wcojb4TFT35", "HaxA7YrQdEC", "k1cupFYWXJ6", "svBbv1Pavdk"]
-  # ['00800-TEEsavR23oF', '00802-wcojb4TFT35', '00813-svBbv1Pavdk', '00814-p53SfW6mjZe', '00820-mL8ThkuaVTM', '00824-Dd4bFSTQ8gi', '00829-QaLdnwvtxbs', '00832-qyAac8rV8Zk', '00835-q3zU7Yy5E5s', '00839-zt1RVoi7PcG', '00843-DYehNKdT76V', '00848-ziup5kvtCCR', '00853-5cdEh9F2hJL', '00873-bxsVRursffK', '00876-mv2HUxq3B53', '00877-4ok3usBNeis', '00878-XB4GS9ShBRE', '00880-Nfvxx8J5NCo', '00890-6s7QHgap2fW', '00891-cvZr5TUy5C5']
-  # content_scenes: ['bxsVRursffK', 'mv2HUxq3B53', '4ok3usBNeis', 'XB4GS9ShBRE', 'Nfvxx8J5NCo', '6s7QHgap2fW', 'cvZr5TUy5C5']
-  content_scenes: ["zt1RVoi7PcG"]
-  # content_scenes: ["QaLdnwvtxbs","qyAac8rV8Zk"]
-  scenes_dir: "/home/zhanxin/foundation_obj_nav/data/scene_datasets"
+  metadata_path: '/data/home/joel/storage/objectnav/objectnav_hm3d_v1/val/val.json.gz'
+  content_scenes: ["6s7QHgap2fW"]
+  scenes_dir: "/data/home/joel/source/foundation_obj_nav/data/scene_datasets/"
