@@ -550,25 +550,28 @@ class Navigator:
     def create_log_folder(log_folder = 'logs'):
         logs_folder = 'logs'
 
-        all_folders = [folder for folder in os.listdir(logs_folder) if os.path.isdir(os.path.join(logs_folder, folder))]
-
         # Filter folders that start with "trial_"
+        all_folders = [folder for folder in os.listdir(logs_folder) if os.path.isdir(os.path.join(logs_folder, folder))]
         trial_folders = [folder for folder in all_folders if folder.startswith("trial_")]
 
         # Extract the numbers and find the maximum
         numbers = [int(folder.split("_")[1]) for folder in trial_folders]
         max_number = max(numbers, default=0)
+        trial_folder = os.path.join(logs_folder, 'trial_' + str(max_number))
+
+        if os.path.exists(trial_folder):
+            if len(os.listdir(trial_folder) == 0):
+                # Folder has no data, so we can go ahead and use it
+                return trial_folder
+            else:
+                # Folder exists but contains data, so create a new one
+                # with the next available numerical ID
+                trial = max_number + 1
         
-        current_trial_folder = os.path.join(logs_folder, 'trial_' + str(max_number))
-        if not os.listdir(current_trial_folder):
-            return current_trial_folder
-        else:
-            trial = max_number + 1
-            trial_folder = os.path.join(logs_folder, 'trial_' + str(trial))
-            if not os.path.exists(trial_folder):
-                os.makedirs(trial_folder)
-            
-            return trial_folder
+        # Create a new folder to save data to
+        trial_folder = os.path.join(logs_folder, 'trial_' + str(trial))   
+        os.makedirs(trial_folder)
+        return trial_folder
 
     def loop(self, obs):
         """
