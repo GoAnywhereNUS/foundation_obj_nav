@@ -1,7 +1,19 @@
+import os
+import sys
+import numpy as np
+import re
+from PIL import Image
+import logging
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import torch
+
 from scene_graph import SceneGraph, default_scene_graph_specs
 from model_interfaces import GPTInterface, VLM_BLIP, VLM_GroundingDino
 import json, os
 
+import time
 
 def most_common(lst):
     if len(lst) > 0: 
@@ -10,30 +22,37 @@ def most_common(lst):
         chosen = None
     return chosen
 
-class NavigatorSimulation(Navigator):
+class Navigator:
     def __init__(
         self,
         scene_graph_specs=default_scene_graph_specs,
         llm_config_path="configs/gpt_config.yaml"
     ):
-        
-        super().__init__(
-            scene_graph_specs=scene_graph_specs, 
-            llm_config_path=llm_config_path
-        )
+        # Set up foundation models for perception and reasoning
+        self.llm = GPTInterface(config_path=llm_config_path)
+        self.perception = {
+            "object": VLM_GroundingDino(),
+            "vqa": VLM_BLIP()
+        }
 
+        # Set up scene graph and state 
+        if scene_graph_specs is None:
+            # TODO: Query LLM to get the specs
+            raise NotImplementedError
         self.scene_graph_specs = scene_graph_specs
-        self.llm_max_qeury = 10
-        self.llm_sampling_query = 5
+        self.scene_graph = SceneGraph(scene_graph_specs)
+        scene_graph_specs_dict = json.loads(scene_graph_specs)
+        self.state_spec = scene_graph_specs_dict["state"]
+        self.current_state = {node_type: None for node_type in self.state_spec}
 
-        self.defined_entrance = []
+        # Set up parameters to be used in reasoning
+        self.llm_max_query = 10
+        self.llm_sampling_query = 5
         self.explored_node = []
         self.path = []
         self.last_subgoal = None
         self.goal = None
 
-        self.env = None
-        self.controller = None
         self.action_step = 0
         self.max_episode_step = 600
         self.llm_loop_iter = 0
@@ -41,34 +60,42 @@ class NavigatorSimulation(Navigator):
         self.is_navigating = False
         self.success_flag = False
 
-        self.trial_folder = None
-        self.action_log_path = os.path.join(self.trial_folder, 'action.txt')
-        self.llm.log_path = os.path.join(self.trial_folder, 'llm_query.log')
+        self.trial_folder = self.create_log_folder()
+        self.action_logging = open(
+            os.path.join(self.trial_folder, 'action.txt'), 'a'
+        )
+        self.llm.reset(self.trial_folder)
+
+        # Note: Env and controller to be implemented in subclass
+
+        # TODO: Review these variables and parameters.
+        self.defined_entrance = []
 
 
     def reset(self):
-        self.scene_graph_specs = scene_graph_specs
-        self.llm_max_qeury = 10
-        self.llm_sampling_query = 5
+        # Reset scene graph
+        self.scene_graph = SceneGraph(self.scene_graph_specs)
 
-        self.defined_entrance = []
+        # Reset data structures
         self.explored_node = []
         self.path = []
         self.last_subgoal = None
         self.goal = None
 
-        self.env = None
-        self.controller = None
+        # Reset variables
         self.action_step = 0
-        self.max_episode_step = 600
         self.llm_loop_iter = 0
-        self.visualisation = True
         self.is_navigating = False
         self.success_flag = False
 
-        self.trial_folder = None
-        self.action_log_path = os.path.join(self.trial_folder, 'action.txt')
-        self.llm.log_path = os.path.join(self.trial_folder, 'llm_query.log')
+        # Reset logging
+        self.trial_folder = self.create_log_folder()
+        self.action_logging = open(
+            os.path.join(self.trial_folder, 'action.txt'), 'a'
+        )
+
+        # Reset LLM
+        self.llm.reset(self.trial_folder)
 
     def query_objects(self, image, suggested_objects=None):
         if suggested_objects is not None:
@@ -145,8 +172,7 @@ class NavigatorSimulation(Navigator):
         Return:
             images: dict of images taken at current pose
         """
-        obs = self.env.get_observation()
-        return obs
+        raise NotImplementedError
 
     def perceive(self, images):
         image_locations = {}
@@ -159,7 +185,10 @@ class NavigatorSimulation(Navigator):
                 location.replace(" ", "") #clean space between "living room"
             )
 
-            if self.query_vqa(image, "Is there a door in the photo?") == 'yes':
+            if (
+                self.query_vqa(image, "Is there a door in the photo?") == 'yes' 
+                and len(self.defined_entrance) > 0
+            ):
                 objects = self.query_objects(image,  self.defined_entrance)
             else:
                 objects = self.query_objects(image)
@@ -245,7 +274,7 @@ class NavigatorSimulation(Navigator):
                 similar_room_obj_descript = self.query_detailed_descript(similar_room_obj)
 
                 store_ans = []
-                for i in range(self.llm_max_qeury):
+                for i in range(self.llm_max_query):
                     whole_query = self.generate_query([room_descript, similar_room_description], None, 'state_estimation')
                     answer = self.llm.query_state_estimation(whole_query)
                     if 'true' in answer:
@@ -427,7 +456,7 @@ class NavigatorSimulation(Navigator):
         Scene_Discript = self.scene_graph.print_sub_scene_graph(selected_node = self.current_state, pretty=False)
         whole_query = self.generate_query(Scene_Discript, goal, 'plan')
 
-        for i in range(self.llm_max_qeury):
+        for i in range(self.llm_max_query):
             seperate_ans = self.llm.query(whole_query)
             if len(seperate_ans) > 0 and seperate_ans[0] in self.scene_graph.nodes():
                 store_ans.append(seperate_ans[0])
@@ -454,7 +483,7 @@ class NavigatorSimulation(Navigator):
             whole_query = self.generate_query(sg_obj_Discript, goal, 'local')
             
             store_ans = []
-            for i in range(self.llm_max_qeury):
+            for i in range(self.llm_max_query):
                 seperate_ans = self.llm.query_local_explore(whole_query)
                 if len(seperate_ans) > 0 and seperate_ans[0] in self.scene_graph.nodes():
                     store_ans.append(seperate_ans[0])
@@ -464,7 +493,7 @@ class NavigatorSimulation(Navigator):
             goal_node_name = most_common(store_ans)
             path = [goal_node_name]
         
-        # if next ubgoal is entrance, we mark it.
+        # if next subgoal is entrance, we mark it.
         if len(path) > 1:
             print('path', path)
             if self.scene_graph.is_type(path[1], 'entrance'):
@@ -484,7 +513,7 @@ class NavigatorSimulation(Navigator):
     
         print(f'Location: {location}\nObjecet: {obj_lst}')
         obj_label_tmp = ['forward'] + img_lang_obs['object']['forward'][1] + ['left'] + img_lang_obs['object']['left'][1] + ['right'] + img_lang_obs['object']['right'][1] + ['rear'] + img_lang_obs['object']['rear'][1]
-        action_logging.write(f'[Obs]: Location: {location}\nObjecet: {obj_label_tmp}\n')
+        self.action_logging.write(f'[Obs]: Location: {location}\nObjecet: {obj_label_tmp}\n')
                 
         for direction in ['forward', 'left', 'right', 'rear']:
             obs_rgb = obs[direction + '_rgb']
@@ -500,44 +529,58 @@ class NavigatorSimulation(Navigator):
                 ax.text(min_x, min_y, label)
             plt.savefig(self.trial_folder + '/'  +  time.strftime("%Y%m%d%H%M%S") + "_" + direction + ".png")
             plt.clf()
-            
-    def has_reached_subgoal(self, state, subgoal):
-        raise NotImplementedError
-    
-    def send_navigation_subgoal(self, subgoal):
-        next_goal = self.last_subgoal
-        print('Next Subgoal:', next_goal, self.scene_graph.scene_graph[next_goal])
-        next_position = self.scene_graph.get_node_attr(next_goal)['bbox'].type(torch.int64).tolist()
-        cam_uuid = self.scene_graph.get_node_attr(next_goal)['cam_uuid']+'_depth'
-        self.controller.set_subgoal_image(next_position, cam_uuid, obs, get_camera_matrix(640, 480, 90))
 
     def check_current_obs(self, obs, img_lang_obs):
         for direction in ['forward', 'left', 'right', 'rear']:
             for i in range(len(img_lang_obs['object'][direction][1])):
                 label = img_lang_obs['object'][direction][1][i]
                 if self.goal in label:
-                    next_position = img_lang_obs['object'][direction][0][i].type(torch.int64).tolist()
-                    cam_uuid = direction +'_depth'
-                    self.controller.set_subgoal_image(next_position, cam_uuid, obs, get_camera_matrix(640, 480, 90))
-                    self.last_subgoal = self.goal
-                    return True
+                    # TODO: Review this. Do not interact with the controller. This is a low-level
+                    # perception-reasoning loop, that should provide some intermediate output
+                    # to command the even lower-level perception-control loop.
+                    pass
+
+                    # next_position = img_lang_obs['object'][direction][0][i].type(torch.int64).tolist()
+                    # cam_uuid = direction +'_depth'
+                    # self.controller.set_subgoal_image(next_position, cam_uuid, obs, get_camera_matrix(640, 480, 90))
+                    # self.last_subgoal = self.goal
+                    # return True
         return False
+
+    def create_log_folder(log_folder = 'logs'):
+        logs_folder = 'logs'
+
+        all_folders = [folder for folder in os.listdir(logs_folder) if os.path.isdir(os.path.join(logs_folder, folder))]
+
+        # Filter folders that start with "trial_"
+        trial_folders = [folder for folder in all_folders if folder.startswith("trial_")]
+
+        # Extract the numbers and find the maximum
+        numbers = [int(folder.split("_")[1]) for folder in trial_folders]
+        max_number = max(numbers, default=0)
+        
+        current_trial_folder = os.path.join(logs_folder, 'trial_' + str(max_number))
+        if not os.listdir(current_trial_folder):
+            return current_trial_folder
+        else:
+            trial = max_number + 1
+            trial_folder = os.path.join(logs_folder, 'trial_' + str(trial))
+            if not os.path.exists(trial_folder):
+                os.makedirs(trial_folder)
+            
+            return trial_folder
 
     def loop(self, obs):
         """
-        Single iteration of the navigation loop
+        Single iteration of high-level perception-reasoning loop for navigation.
 
         Returns:
             None
         """
         # Observe
-        action_logging.write(f'--------- Loop {self.llm_loop_iter} -----------\n')
+        self.action_logging.write(f'--------- Loop {self.llm_loop_iter} -----------\n')
         print('------------  Receive Lang Obs   -------------')
         img_lang_obs = self.perceive(obs)
-
-        if self.check_current_obs(self, obs, img_lang_obs):
-            self.is_navigating = True
-            continue
 
         if self.visualisation:
             self.visualise_objects(obs, img_lang_obs)
@@ -546,7 +589,7 @@ class NavigatorSimulation(Navigator):
         self.update_scene_graph(img_lang_obs)
         print('------------  Update Scene Graph   -------------')
         scene_graph_str = self.scene_graph.print_scene_graph(pretty=False,skip_object=False)
-        action_logging.write(f'Scene Graph: {scene_graph_str}\n')
+        self.action_logging.write(f'Scene Graph: {scene_graph_str}\n')
         print(scene_graph_str)
 
         # Plan
@@ -568,31 +611,4 @@ class NavigatorSimulation(Navigator):
         Returns:
             None
         """
-        action_logging = open(self.action_log_path, "a")
-        while (self.action_step < self.max_episode_step) and (self.success_flag == False):
-            obs = self._observe()
-
-            if self.is_navigating == False:
-                self.llm_loop_iter += 1  
-                self.loop(obs)
-                continue
-
-
-            self.controller.update(obs)
-            action, success = self.controller.step()
-            if action is None:
-                self.is_navigating = False
-                self.explored_node.append(self.last_subgoal)
-                if self.last_subgoal == self.goal:
-                    self.success_flag = True
-                    if self.visualisation:
-                        img_lang_obs = self.perceive(obs)
-                        self.visualise_objects(obs,img_lang_obs)
-            else:
-                self.controller.act(action)
-                self.action_step += 1
-                current_loc = self.perceive_location(obs)
-                if self.action_step >= self.max_episode_step:
-                    action_logging.write(f"[END]: FAIL\n")
-        
-        action_logging.close()
+        raise NotImplementedError

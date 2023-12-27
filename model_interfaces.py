@@ -233,19 +233,20 @@ class GPTInterface(LLMInterface):
         
         self.log_path = log_path
 
-    def reset(self):
-        logs_folder = 'logs'
+    def reset(self, log_path=None):
+        if log_path is None:
+            logs_folder = 'logs'
+            all_folders = [folder for folder in os.listdir(logs_folder) if os.path.isdir(os.path.join(logs_folder, folder))]
 
-        all_folders = [folder for folder in os.listdir(logs_folder) if os.path.isdir(os.path.join(logs_folder, folder))]
+            # Filter folders that start with "trial_"
+            trial_folders = [folder for folder in all_folders if folder.startswith("trial_")]
 
-        # Filter folders that start with "trial_"
-        trial_folders = [folder for folder in all_folders if folder.startswith("trial_")]
-
-        # Extract the numbers and find the maximum
-        numbers = [int(folder.split("_")[1]) for folder in trial_folders]
-        max_number = max(numbers, default=0)
-        trial_folder = os.path.join(logs_folder, 'trial_' + str(max_number))
-        log_path = os.path.join(trial_folder, 'llm_query.log')
+            # Extract the numbers and find the maximum
+            numbers = [int(folder.split("_")[1]) for folder in trial_folders]
+            max_number = max(numbers, default=0)
+            log_path = os.path.join(logs_folder, 'trial_' + str(max_number))
+            
+        log_path = os.path.join(log_path, 'llm_query.log')
         self.log_path = log_path
 
     def query(self, string):

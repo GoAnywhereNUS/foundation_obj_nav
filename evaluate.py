@@ -47,7 +47,7 @@ class NavigatorSimulation(Navigator):
         )
 
         self.scene_graph_specs = scene_graph_specs
-        self.llm_max_qeury = 10
+        self.llm_max_query = 10
         self.llm_sampling_query = 5
 
         self.defined_entrance = ['doorway', 'entrance', 'door frame']
@@ -312,7 +312,7 @@ class NavigatorSimulation(Navigator):
                 similar_room_obj_descript = self.query_detailed_descript(similar_room_obj)
 
                 store_ans = []
-                for i in range(self.llm_max_qeury):
+                for i in range(self.llm_max_query):
                     whole_query = self.generate_query([room_descript, similar_room_description], None, 'state_estimation')
                     answer = self.llm.query_state_estimation(whole_query)
                     if 'true' in answer:
@@ -494,7 +494,7 @@ class NavigatorSimulation(Navigator):
         Scene_Discript = self.scene_graph.print_sub_scene_graph(selected_node = self.current_state, pretty=False)
         whole_query = self.generate_query(Scene_Discript, goal, 'plan')
 
-        for i in range(self.llm_max_qeury):
+        for i in range(self.llm_max_query):
             seperate_ans = self.llm.query(whole_query)
             if len(seperate_ans) > 0 and seperate_ans[0] in self.scene_graph.nodes():
                 store_ans.append(seperate_ans[0])
@@ -521,7 +521,7 @@ class NavigatorSimulation(Navigator):
             whole_query = self.generate_query(sg_obj_Discript, goal, 'local')
             
             store_ans = []
-            for i in range(self.llm_max_qeury):
+            for i in range(self.llm_max_query):
                 seperate_ans = self.llm.query_local_explore(whole_query)
                 if len(seperate_ans) > 0 and seperate_ans[0] in self.scene_graph.nodes():
                     store_ans.append(seperate_ans[0])
