@@ -561,14 +561,15 @@ class Navigator:
         max_number = max(numbers, default=0)
         trial_folder = os.path.join(logs_folder, 'trial_' + str(max_number))
 
+        trial = max_number
         if os.path.exists(trial_folder):
-            if len(os.listdir(trial_folder) == 0):
+            if len(os.listdir(trial_folder)) == 0:
                 # Folder has no data, so we can go ahead and use it
                 return trial_folder
             else:
                 # Folder exists but contains data, so create a new one
                 # with the next available numerical ID
-                trial = max_number + 1
+                trial += 1
         
         # Create a new folder to save data to
         trial_folder = os.path.join(logs_folder, 'trial_' + str(trial))   
