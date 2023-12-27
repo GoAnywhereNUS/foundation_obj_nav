@@ -1,36 +1,74 @@
 from scene_graph import SceneGraph, default_scene_graph_specs
 from model_interfaces import GPTInterface, VLM_BLIP, VLM_GroundingDino
-import json
+import json, os
 
-class Navigator:
+
+def most_common(lst):
+    if len(lst) > 0: 
+        chosen = max(set(lst), key=lst.count)
+    else:
+        chosen = None
+    return chosen
+
+class NavigatorSimulation(Navigator):
     def __init__(
-        self, 
+        self,
         scene_graph_specs=default_scene_graph_specs,
         llm_config_path="configs/gpt_config.yaml"
     ):
+        
+        super().__init__(
+            scene_graph_specs=scene_graph_specs, 
+            llm_config_path=llm_config_path
+        )
 
-        # Initialise foundation models used for agent's functions
-        self.llm = GPTInterface(config_path=llm_config_path)
-        self.perception = {
-            "object": VLM_GroundingDino(),
-            "vqa": VLM_BLIP()
-        }
+        self.scene_graph_specs = scene_graph_specs
+        self.llm_max_qeury = 10
+        self.llm_sampling_query = 5
 
-        # Initialise agent's memory (i.e. scene graph, agent's state)
-        if scene_graph_specs is None:
-            # TODO: Query LLM to get the specs
-            raise NotImplementedError
-        self.scene_graph_specs = json.loads(scene_graph_specs)
-        self.scene_graph = SceneGraph(scene_graph_specs)
-        self.state_spec = self.scene_graph_specs["state"]
-        self.current_state = {node_type: None for node_type in self.state_spec}
-        self.plan = None
+        self.defined_entrance = []
+        self.explored_node = []
+        self.path = []
         self.last_subgoal = None
+        self.goal = None
+
+        self.env = None
+        self.controller = None
+        self.action_step = 0
+        self.max_episode_step = 600
+        self.llm_loop_iter = 0
+        self.visualisation = True
         self.is_navigating = False
+        self.success_flag = False
+
+        self.trial_folder = None
+        self.action_log_path = os.path.join(self.trial_folder, 'action.txt')
+        self.llm.log_path = os.path.join(self.trial_folder, 'llm_query.log')
+
 
     def reset(self):
-        self.scene_graph = SceneGraph(self.scene_graph_specs)
-        self.llm.reset()
+        self.scene_graph_specs = scene_graph_specs
+        self.llm_max_qeury = 10
+        self.llm_sampling_query = 5
+
+        self.defined_entrance = []
+        self.explored_node = []
+        self.path = []
+        self.last_subgoal = None
+        self.goal = None
+
+        self.env = None
+        self.controller = None
+        self.action_step = 0
+        self.max_episode_step = 600
+        self.llm_loop_iter = 0
+        self.visualisation = True
+        self.is_navigating = False
+        self.success_flag = False
+
+        self.trial_folder = None
+        self.action_log_path = os.path.join(self.trial_folder, 'action.txt')
+        self.llm.log_path = os.path.join(self.trial_folder, 'llm_query.log')
 
     def query_objects(self, image, suggested_objects=None):
         if suggested_objects is not None:
@@ -38,9 +76,66 @@ class Navigator:
         else:
             return self.perception['object'].detect_all_objects(image)
 
+    def calculate_iou(self, bbox1, bbox2):
+        # Calculate the intersection coordinates
+        x1_inter = max(bbox1[0], bbox2[0])
+        y1_inter = max(bbox1[1], bbox2[1])
+        x2_inter = min(bbox1[2], bbox2[2])
+        y2_inter = min(bbox1[3], bbox2[3])
+
+        # Calculate the area of intersection
+        intersection_area = max(0, x2_inter - x1_inter + 1) * max(0, y2_inter - y1_inter + 1)
+
+        # Calculate the areas of each bounding box
+        area_bbox1 = (bbox1[2] - bbox1[0] + 1) * (bbox1[3] - bbox1[1] + 1)
+        area_bbox2 = (bbox2[2] - bbox2[0] + 1) * (bbox2[3] - bbox2[1] + 1)
+
+        # Calculate the Union area
+        union_area = area_bbox1 + area_bbox2 - intersection_area
+
+        if union_area <= 0:
+            return 0  # No overlap, IoU is 0
+
+        # Calculate the IoU
+        iou = intersection_area / union_area
+
+        return iou
+
+    def get_nearby_bbox(self, target_bbox, all_bbox, distance_threshold = 100, overlap_threshold = 0.1):
+        #Sample data: Bounding boxes as (x_min, y_min, x_max, y_max)
+
+        # Calculate the center of the specific bounding box
+        specific_center = ((target_bbox[0] + target_bbox[2]) / 2, (target_bbox[1] + target_bbox[3]) / 2)
+
+        # # Find nearby bounding boxes 
+        nearby_bboxes_idx = []
+        for i in range(len(all_bbox)):
+            bbox = all_bbox[i]
+            if list(bbox) == list(target_bbox):
+                continue
+            if np.sqrt((bbox[0] - specific_center[0])**2 + (bbox[1] - specific_center[1])**2) <= distance_threshold:
+                # print(np.sqrt((bbox[0] - specific_center[0])**2 + (bbox[1] - specific_center[1])**2))
+                nearby_bboxes_idx.append(i)
+            elif self.calculate_iou(target_bbox, bbox) > overlap_threshold:
+                nearby_bboxes_idx.append(i)
+        return nearby_bboxes_idx
+
     def query_vqa(self, image, prompt):
         return self.perception['vqa'].query(image, prompt)
-    
+
+    def query_detailed_descript(self, obj_names_list, obj_cropped_img_lst = None):
+        update_descript_list = []
+        for i, obj_name in enumerate(obj_names_list):
+            if obj_cropped_img_lst == None:
+                obj_img = self.scene_graph.get_node_attr(obj_name)['image']
+            else:
+                obj_img = obj_cropped_img_lst[i]
+            color = self.query_vqa(obj_img, f"What color is the {obj_name.split('_')[0]}?")
+            material = self.query_vqa(obj_img, f"What material is the {obj_name.split('_')[0]}?")
+            descript =  color + ' ' + material + ' '+ obj_name.split('_')[0]
+            update_descript_list.append(descript)
+        return update_descript_list
+
     def _observe(self):
         """
         Get observations from the environment (e.g. render images for
@@ -50,30 +145,76 @@ class Navigator:
         Return:
             images: dict of images taken at current pose
         """
-        raise NotImplementedError
+        obs = self.env.get_observation()
+        return obs
 
     def perceive(self, images):
-        """
-        Process raw images into image-language observations for the LLM's
-        consumption.
+        image_locations = {}
+        image_objects = {}
+        for label in ['left', 'forward', 'right', 'rear']:
+            image = images[label + '_rgb']
+            image = Image.fromarray(image)
+            location = self.query_vqa(image, "Which room is the photo?")
+            image_locations[label] = (
+                location.replace(" ", "") #clean space between "living room"
+            )
 
-        Return:
-            location: name of current location answered by VQA
-            objects: list of all objects observed in current vicinity
-        """
-        image = self._get_image()
-        location = self.query_vqa(image, "Where is this photo taken?")
-        objects = self.query_objects(image)
+            if self.query_vqa(image, "Is there a door in the photo?") == 'yes':
+                objects = self.query_objects(image,  self.defined_entrance)
+            else:
+                objects = self.query_objects(image)
+            image_objects[label] = objects
+
+        # TODO: Implement some reasonable fusion across all images
         return {
-            "location": location,
-            "object": objects
+            "location": image_locations,
+            "object": image_objects
         }
-    
+
+    def perceive_location(self, images):
+        image_locations = {}
+        for label in ['left_rgb', 'forward_rgb', 'right_rgb', 'rear_rgb']:
+            image = images[label]
+            image = Image.fromarray(image)
+            location = self.query_vqa(image, "Which room is the photo?")
+            image_locations[label] = (
+                location.replace(" ", "") #clean space between "living room"
+            )
+        obs_location = most_common([image_locations['forward_rgb'], image_locations['left_rgb'], image_locations['right_rgb'], image_locations['rear_rgb']])
+        # TODO: Implement some reasonable fusion across all images
+        return obs_location
+
+    def generate_query(self, discript, goal, query_type):
+        if query_type == 'plan':
+            start_question = "You see the partial layout of the apartment:\n"
+            end_question = f"\nQuestion: Your goal is to find a {goal}. If any of the rooms in the layout are likely to contain the target object, reply the most probable room name, not any door name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found. Follow my format to state reasoning and answer. Please only use one word in answer."
+            explored_item_list = [x for x in self.explored_node if isinstance(x, str)]
+            explored_query = "The following has been explored: " + "["+ ", ".join(list(set(explored_item_list))) + "]. Please dont reply explored place or object."
+            whole_query = start_question + discript + end_question + explored_query
+        elif query_type == 'classify':
+            start_question = "There is a list:"
+            end_question = "Please eliminate redundant strings in the element from the list and classify them into \"room\", \"entrance\", and \"object\" classes. Ignore floor, ceiling and wall. Keep the number in the name. \nAnswer:"
+            whole_query = start_question + discript + end_question
+        elif query_type == 'local':
+            start_question = "There is a list:"
+            end_question = f"Please select one object that is most likely located near a {goal}. Please only select one object in the list and use one word in answer."
+            whole_query = start_question + discript + end_question
+        elif query_type == 'state_estimation':
+            discript1 = "Depiction1: On the left, there is " + ", ".join(discript[0]['left']) + ". On the right, there is " + ", ".join(discript[0]['right']) + ". In front of me, there is " + ", ".join(discript[0]['forward']) + ". Behind me, there is " + ", ".join(discript[0]['rear']) + '\n'
+            discript2 = "Depiction2: On the left, there is " + ", ".join(discript[1]['left']) + ". On the right, there is " + ", ".join(discript[1]['right']) + ".In front of me, there is " + ", ".join(discript[1]['forward']) + ". Behind me, there is " + ", ".join(discript[1]['rear']) + '\n'
+            question = "These are depictions of what I observe from two different vantage points. Please tell me if these two viewpoints correspond to the same room. It's important to note that the descriptions may originate from two positions within the room, each with a distinct angle. Therefore, the descriptions may pertain to the same room but not necessarily capture the same elements. Please be aware that my viewing angle varies, so it is not necessary for the elements to align in the same direction. As long as the relative positions between objects are accurate, it is considered acceptable. Please assess the arrangement of objects and identifiable features in the descriptions to determine whether these two positions are indeed in the same place. Provide a response of True or False, along with supporting reasons."
+            whole_query = discript1 + discript2 + question
+        return whole_query
+
     def estimate_state(self, obs):
         """
         Queries the LLM with the observations and scene graph to
         get our current state.
 
+        Inpit:
+            obs: { "location": location, # room type, eg: livingroom_1
+                    "object": objects # object labels and bounding boxes
+                    }
         Return:
             state: agent's estimated state as dict in the format
                    {'floor': (new_flag, semantic_label), 'room': (new_flag, semantic_label), ...}
@@ -81,57 +222,343 @@ class Navigator:
                    particular level, and semantic_label is the language label to that node 
                    from the VLM.
         """
-        raise NotImplementedError
+        
+        est_state = None
+
+        obj_label_descript = self.query_detailed_descript(obs['cleaned_object'], obs['cleaned_object_cropped_img'])
+        room_descript = {'left':[], 'right':[], 'forward':[], 'rear':[]}
+        for i, label in enumerate(obj_label_descript):
+            room_descript[obs['cleand_sensor_dir'][i]].append(label)
+
+        # TODO: add weight on differentt direction based on object num in each direction
+        obs_location = most_common([obs['location']['forward'], obs['location']['left'], obs['location']['right'], obs['location']['rear']])
+        
+        room_lst_scene_graph = self.scene_graph.get_secific_type_nodes('room')
+        all_room = [room[:room.index('_')] for room in room_lst_scene_graph]
+        # if current room is already in scene graph
+        if obs_location in all_room:
+            indices = [index for index, element in enumerate(all_room) if element == obs_location]
+            for i in indices:
+                similar_room = room_lst_scene_graph[i]
+                similar_room_description = self.scene_graph.get_node_attr(similar_room)['description']
+                similar_room_obj = self.scene_graph.get_obj_in_room(similar_room)
+                similar_room_obj_descript = self.query_detailed_descript(similar_room_obj)
+
+                store_ans = []
+                for i in range(self.llm_max_qeury):
+                    whole_query = self.generate_query([room_descript, similar_room_description], None, 'state_estimation')
+                    answer = self.llm.query_state_estimation(whole_query)
+                    if 'true' in answer:
+                        store_ans.append(1)
+                    elif 'false'in answer:
+                        store_ans.append(0)
+                    if len(store_ans) >= self.llm_sampling_query:
+                        break
+        
+                print("State Estimation:", store_ans)
+
+                is_similar = most_common(store_ans)
+                if is_similar:
+                    est_state = similar_room
+                    break
+        return est_state, room_descript
     
-    def update_scene_graph(self, est_state, obs):
+    def update_scene_graph(self, obs, flag = False):
         """
         Updates scene graph using localisation estimate from LLM, and
         observations from VLM.
+
+        Notice: currently, not use est_state
 
         Return:
             state: agent's current state as dict, e.g. {'floor': xxx, 'room': xxx, ...}
         """
 
-    def plan_path(self):
-        # TODO: Query LLM
+        # TODO: Need panaromic view to estimate state
+        
+        # Deal with multiple rgn sensors
+        obj_label = obs['object']['forward'][1] + obs['object']['left'][1] + obs['object']['right'][1] + obs['object']['rear'][1]
+        obj_bbox = torch.cat((obs['object']['forward'][0], obs['object']['left'][0], obs['object']['right'][0], obs['object']['rear'][0]), dim=0)
+        cropped_imgs = obs['object']['forward'][2] + obs['object']['left'][2] + obs['object']['right'][2] + obs['object']['rear'][2]
+        obs_location = most_common([obs['location']['forward'], obs['location']['left'], obs['location']['right'], obs['location']['rear']])
+        idx_sensordirection = ['forward' for i in range(len(obs['object']['forward'][1]))] + ['left' for i in range(len(obs['object']['left'][1]))] + ['right' for i in range(len(obs['object']['right'][1]))] + ['rear' for i in range(len(obs['object']['rear'][1]))] 
+        # Add bbox index into obj label
+        obj_label = [f'{item}_{index}' for index, item in enumerate(obj_label)]
+        obs_obj_discript = "["+ ", ".join(obj_label) + "]"
+        whole_query = self.generate_query(obs_obj_discript, None, 'classify')
 
-        path = self.scene_graph.plan_shortest_paths(self.current_state, goal_node_name)[0]
-        return path
+        attempts = 0
+
+        while attempts < 5:
+            try:
+                # Query LLM to classify detected objects in 'room','entrance' and 'object' 
+                seperate_ans = self.llm.query_object_class(whole_query)
+
+                room_idx = seperate_ans.index('room')
+                entrance_idx = seperate_ans.index('entrance')
+                object_idx = seperate_ans.index('object')
+                
+                room_lst = seperate_ans[room_idx+1:entrance_idx]
+                entrance_lst = seperate_ans[entrance_idx+1:object_idx]
+                object_lst = seperate_ans[object_idx+1:]
+
+                format_test = entrance_lst + object_lst
+                for item in format_test:
+                    if '_' in item:
+                        obj_name = item.split('_')[0]
+                        idx = int(item.split('_')[1])
+                break
+            except:
+                attempts += 1
+        # Estimate State
     
+        cropped_img_lst = []
+        cleand_sensor_dir = []
+        cleaned_object_lst = []
+        for obj in object_lst:
+            try:
+                bb_idx = int(obj.split('_')[1])
+            except:
+                continue
+            if bb_idx < len(cropped_imgs): # in case LLM return index out of range
+                cropped_img_lst.append(cropped_imgs[bb_idx])
+                cleand_sensor_dir.append(idx_sensordirection[bb_idx])
+                cleaned_object_lst.append(obj)
+        obs['cleaned_object'] = cleaned_object_lst
+        obs['cleaned_object_cropped_img'] = cropped_img_lst
+        obs['cleand_sensor_dir'] = cleand_sensor_dir
+
+        print('-------------  State Estimation --------------')
+        est_state, room_description = self.estimate_state(obs)
+        print('Room Description', room_description) 
+        # Update Room Node
+        if est_state != None:
+            self.current_state = est_state
+            print(f'Existing node: {self.current_state}')
+        else:
+            self.current_state = self.scene_graph.add_node("room", obs_location, {"image": np.random.rand(4, 4), "description": room_description})
+            if self.last_subgoal != None and self.scene_graph.is_type(self.last_subgoal, 'entrance'):
+                self.scene_graph.add_edge(self.current_state, self.last_subgoal, "connects to")
+                self.explored_node.append(self.last_subgoal)
+                for idx, item in enumerate(entrance_lst):
+                    if item == 'none':
+                        continue
+                    if '_' in item:
+                        entrance_name = item.split('_')[0]
+                        bb_idx = int(item.split('_')[1])
+                        sensor_dir = idx_sensordirection[bb_idx]
+                        #TODO: how to choose the last entrance image
+                        if sensor_dir == 'rear':
+                            entrance_lst[idx] =  'LAST' + entrance_lst[idx]
+                            break
+            print(f'Add new node: {self.current_state}')
+
+        room_lst_scene_graph = self.scene_graph.get_secific_type_nodes('room')
+        all_room = [room[:room.index('_')] for room in room_lst_scene_graph]
+        
+        # TODO: If the reply does not have '_', update fails.
+        bbox_idx_to_obj_name = {}
+        for item in object_lst:
+            if item == 'none':
+                continue
+            try:
+                if '_' in item:
+                    obj_name = item.split('_')[0]
+                    if obj_name in all_room: # if the object name is also room name, skip it. otherwise the room name may point to object node
+                        continue
+                    bb_idx = int(item.split('_')[1])
+                    sensor_dir = idx_sensordirection[bb_idx]
+                    temp_obj = self.scene_graph.add_node("object", obj_name, {"image": cropped_imgs[bb_idx],"bbox": obj_bbox[bb_idx], "cam_uuid": sensor_dir})
+                    self.scene_graph.add_edge(self.current_state, temp_obj, "contains")
+                    bbox_idx_to_obj_name[bb_idx] = temp_obj
+            except:
+                print(f'Scene Graph: Fail to add object item {item}')
+
+        for item in entrance_lst:
+            if item == 'none':
+                continue
+            if '_' in item:
+                entrance_name = item.split('_')[0]
+                bb_idx = int(item.split('_')[1])
+                
+                if self.current_state[:-2] == entrance_name: # handle wrong entrance name, (To be deleted).
+                    continue
+                try:
+                    sensor_dir = idx_sensordirection[bb_idx] # get the sensor direction for this entrance
+                    if 'LAST' in item:
+                        temp_entrance = self.last_subgoal
+                        self.scene_graph.nodes()[temp_entrance]['cam_uuid'] = cropped_imgs[bb_idx]
+                        self.scene_graph.nodes()[temp_entrance]['bbox'] = obj_bbox[bb_idx]
+                        self.scene_graph.nodes()[temp_entrance]['cam_uuid'] = sensor_dir
+                    else:
+                        temp_entrance = self.scene_graph.add_node("entrance", entrance_name, {"image": cropped_imgs[bb_idx],"bbox": obj_bbox[bb_idx],"cam_uuid": sensor_dir})
+                    self.scene_graph.add_edge(self.current_state, temp_entrance, "connects to")
+                    bbox_in_specific_dir = np.where(np.array(idx_sensordirection) == sensor_dir)[0] # get all objects in the direction
+                    nearby_bbox_idx = self.get_nearby_bbox(obj_bbox[bb_idx],obj_bbox[bbox_in_specific_dir,])
+                    for idx in nearby_bbox_idx:
+                        if idx in bbox_idx_to_obj_name.keys():
+                            new_obj = bbox_idx_to_obj_name[idx] 
+                            self.scene_graph.add_edge(temp_entrance, new_obj, "is near")
+                except:
+                    print('ERROR')
+        return est_state
+
+
+    def plan_path(self, goal):
+        '''
+        Plan based on Scene graph
+        Input:
+            goal: string, target object
+        Return:
+            plan: list of node name from current state to goal state;
+                  if already in the goal room, return object list that is most likely near goal
+        '''
+
+        ########### Begin Query LLM for Plan #################
+        print('goal', goal)
+        store_ans = []
+
+        obj_lst_scene_graph = self.scene_graph.get_secific_type_nodes('object')
+        for obj in obj_lst_scene_graph:
+            if goal in obj:
+                self.path = [obj]
+                return self.path
+
+        Scene_Discript = self.scene_graph.print_sub_scene_graph(selected_node = self.current_state, pretty=False)
+        whole_query = self.generate_query(Scene_Discript, goal, 'plan')
+
+        for i in range(self.llm_max_qeury):
+            seperate_ans = self.llm.query(whole_query)
+            if len(seperate_ans) > 0 and seperate_ans[0] in self.scene_graph.nodes():
+                store_ans.append(seperate_ans[0])
+            if len(store_ans)  >= self.llm_sampling_query:
+                break
+        
+        # use whole lopp to choose the most common goal name that is in the scene graph
+        print('[PLAN INFO] Receving Ans from LLM:', store_ans)
+
+        store_ans_copy = store_ans.copy()
+        goal_node_name = most_common(store_ans)
+
+        print(f'[PLAN INFO] current state:{self.current_state}, goal state:{goal_node_name}')
+
+        ########### End Query LLM for Plan #################
+
+        path = self.scene_graph.plan_shortest_paths(self.current_state, goal_node_name)
+
+        # If we are already in the target room, Start local exploration in the room
+        if path[-1] == self.current_state:
+            self.explored_node.append(self.current_state)
+            obj_lst = self.scene_graph.get_obj_in_room(self.current_state)
+            sg_obj_Discript = "["+ ", ".join(obj_lst) + "]"
+            whole_query = self.generate_query(sg_obj_Discript, goal, 'local')
+            
+            store_ans = []
+            for i in range(self.llm_max_qeury):
+                seperate_ans = self.llm.query_local_explore(whole_query)
+                if len(seperate_ans) > 0 and seperate_ans[0] in self.scene_graph.nodes():
+                    store_ans.append(seperate_ans[0])
+                if len(store_ans)  >= self.llm_sampling_query:
+                    break
+            
+            goal_node_name = most_common(store_ans)
+            path = [goal_node_name]
+        
+        # if next ubgoal is entrance, we mark it.
+        if len(path) > 1:
+            print('path', path)
+            if self.scene_graph.is_type(path[1], 'entrance'):
+                self.last_subgoal = path[1]
+        else:
+            self.last_subgoal = path[0]
+        self.path = path
+            
+        print(f'[PLAN INFO] Path:{self.path}')
+
+        return path
+
+    def visualise_objects(self, obs, img_lang_obs):
+
+        location = img_lang_obs['location']
+        obj_lst = img_lang_obs['object']
+    
+        print(f'Location: {location}\nObjecet: {obj_lst}')
+        obj_label_tmp = ['forward'] + img_lang_obs['object']['forward'][1] + ['left'] + img_lang_obs['object']['left'][1] + ['right'] + img_lang_obs['object']['right'][1] + ['rear'] + img_lang_obs['object']['rear'][1]
+        action_logging.write(f'[Obs]: Location: {location}\nObjecet: {obj_label_tmp}\n')
+                
+        for direction in ['forward', 'left', 'right', 'rear']:
+            obs_rgb = obs[direction + '_rgb']
+            plt.imshow(obs_rgb.squeeze())
+            ax = plt.gca()
+            for i in range(len(img_lang_obs['object'][direction][1])):
+                label = img_lang_obs['object'][direction][1][i]
+                min_x, min_y, max_x, max_y = img_lang_obs['object'][direction][0][i]
+                if self.goal in label:
+                    ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='red', facecolor=(0,0,0,0), lw=2))
+                else:
+                    ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
+                ax.text(min_x, min_y, label)
+            plt.savefig(self.trial_folder + '/'  +  time.strftime("%Y%m%d%H%M%S") + "_" + direction + ".png")
+            plt.clf()
+            
     def has_reached_subgoal(self, state, subgoal):
         raise NotImplementedError
     
     def send_navigation_subgoal(self, subgoal):
-        raise NotImplementedError
+        next_goal = self.last_subgoal
+        print('Next Subgoal:', next_goal, self.scene_graph.scene_graph[next_goal])
+        next_position = self.scene_graph.get_node_attr(next_goal)['bbox'].type(torch.int64).tolist()
+        cam_uuid = self.scene_graph.get_node_attr(next_goal)['cam_uuid']+'_depth'
+        self.controller.set_subgoal_image(next_position, cam_uuid, obs, get_camera_matrix(640, 480, 90))
 
-    def loop(self):
+    def check_current_obs(self, obs, img_lang_obs):
+        for direction in ['forward', 'left', 'right', 'rear']:
+            for i in range(len(img_lang_obs['object'][direction][1])):
+                label = img_lang_obs['object'][direction][1][i]
+                if self.goal in label:
+                    next_position = img_lang_obs['object'][direction][0][i].type(torch.int64).tolist()
+                    cam_uuid = direction +'_depth'
+                    self.controller.set_subgoal_image(next_position, cam_uuid, obs, get_camera_matrix(640, 480, 90))
+                    self.last_subgoal = self.goal
+                    return True
+        return False
+
+    def loop(self, obs):
         """
         Single iteration of the navigation loop
 
         Returns:
             None
         """
-        if self.is_navigating:
-            return
-        
-        # Get "observations" from VLMs
-        image_lang_obs = self.observe()
+        # Observe
+        action_logging.write(f'--------- Loop {self.llm_loop_iter} -----------\n')
+        print('------------  Receive Lang Obs   -------------')
+        img_lang_obs = self.perceive(obs)
 
-        # Localise and update scene graph
-        state = self.estimate_state(image_lang_obs)
-        state = self.update_scene_graph(state, image_lang_obs)
-        self.current_state = state
+        if self.check_current_obs(self, obs, img_lang_obs):
+            self.is_navigating = True
+            continue
 
-        # If not currently executing a plan, get new plan from LLM.
-        # If currently executing a plan, get next subgoal if we have
-        # successfully executed current subgoal, else re-plan with LLM.
-        if self.plan is None or not self.has_reached_subgoal(state, self.last_subgoal):
-            self.plan = self.plan_path()
-        next_subgoal = self.plan[-1]
+        if self.visualisation:
+            self.visualise_objects(obs, img_lang_obs)
 
+        # Update
+        self.update_scene_graph(img_lang_obs)
+        print('------------  Update Scene Graph   -------------')
+        scene_graph_str = self.scene_graph.print_scene_graph(pretty=False,skip_object=False)
+        action_logging.write(f'Scene Graph: {scene_graph_str}\n')
+        print(scene_graph_str)
+
+        # Plan
+        print('-------------  Plan Path --------------')
+        path = self.plan_path(self.goal)
         self.is_navigating = True
-        self.send_navigation_subgoal(next_subgoal)
-        self.plan.pop()
+
+        if len(path) > 1:
+            next_goal = path[1]
+        else:
+            next_goal = path[0]
+        return next_goal
 
     def run(self):
         """
@@ -141,4 +568,31 @@ class Navigator:
         Returns:
             None
         """
-        raise NotImplementedError
+        action_logging = open(self.action_log_path, "a")
+        while (self.action_step < self.max_episode_step) and (self.success_flag == False):
+            obs = self._observe()
+
+            if self.is_navigating == False:
+                self.llm_loop_iter += 1  
+                self.loop(obs)
+                continue
+
+
+            self.controller.update(obs)
+            action, success = self.controller.step()
+            if action is None:
+                self.is_navigating = False
+                self.explored_node.append(self.last_subgoal)
+                if self.last_subgoal == self.goal:
+                    self.success_flag = True
+                    if self.visualisation:
+                        img_lang_obs = self.perceive(obs)
+                        self.visualise_objects(obs,img_lang_obs)
+            else:
+                self.controller.act(action)
+                self.action_step += 1
+                current_loc = self.perceive_location(obs)
+                if self.action_step >= self.max_episode_step:
+                    action_logging.write(f"[END]: FAIL\n")
+        
+        action_logging.close()
