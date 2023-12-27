@@ -206,7 +206,82 @@ class SceneGraph:
             return json.dumps(sg_dict, indent=(2 if pretty else None))
         else:
             return sg_dict
-            
+
+    def print_sub_scene_graph(self, selected_node, json_flag=True, pretty=False, skip_object=True):
+        """
+        Prints the scene graph as a dict or JSON string. It represents the scene graph
+        using the standard format below, which is also used for loading graphs.
+        Assume that default_scene_graph_specs are used:
+
+        {
+            'rooms': [
+                'livingroom1': {
+                    'contains': [... objects ...],
+                    'connects to': [... doors ...]
+                }, ...
+            ],
+            'entrances': [
+                'entrance1': {
+                    'is near': [... objects ...],
+                    'connects to': [... rooms ...]
+                }, ...
+            ],
+            'objects': ['object1', 'object2', ...]
+        }
+
+        Input:
+            pretty: If True, pretty prints with newlines.
+        
+        Return:
+            scene_graph_dict or scene_graph_string
+        """
+
+        sg_dict = {}
+        sub_graph = nx.subgraph(self.scene_graph, nx.node_connected_component(self.scene_graph, selected_node))
+        # Populate each node_type
+        for node_type in self.scene_graph_specs.keys():
+            if node_type == "state":
+                # Ignore state representation key
+                continue
+
+            if node_type == "object":
+                # Only list all the objects without listing their edges
+                # since they are the leaf nodes of the scene graph
+                if not skip_object:
+                    sg_dict["object"] = [
+                        n for n, atts in sub_graph.nodes(data=True) 
+                        if atts['type'] == "object"
+                    ]
+                continue
+
+            # Otherwise, list all the nodes of this particular node_type
+            # along with all their edges
+            node_instances = [
+                n for n, atts in sub_graph.nodes(data=True) 
+                if atts['type'] == node_type
+            ]
+            edge_types = self.scene_graph_specs[node_type].copy()
+            if skip_object:
+                edge_types.pop('contains',0)
+
+            node_instance_atts = {
+                node_inst: {
+                    etype: [
+                        dst for _, dst, atts in sub_graph.edges(node_inst, data=True) 
+                        if atts['relation'] == etype
+                    ]
+                    for etype in edge_types
+                }
+                for node_inst in node_instances
+            }
+            sg_dict[node_type] = node_instance_atts
+
+        if json_flag:
+            return json.dumps(sg_dict, indent=(2 if pretty else None))
+        else:
+            return sg_dict
+
+
     def load_scene_graph(self):
         # TODO
         raise NotImplementedError
@@ -236,10 +311,11 @@ if __name__ == "__main__":
     d2 = sg.add_node("entrance", "door", {"image": np.random.rand(4, 4)})
     obj1 = sg.add_node("object", "lamp", {"image": np.random.rand(4, 4)})
     obj2 = sg.add_node("object", "vase", {"image": np.random.rand(4, 4)})
+    obj3 = sg.add_node("object", "tv", {"image": np.random.rand(4, 4)})
 
     sg.add_edge(lr1, d1, "connects to")
     sg.add_edge(lr1, d2, "connects to")
-    sg.add_edge(d1, lr1, "connects to")
+    # sg.add_edge(d1, lr1, "connects to")
 
     sg.add_edge(lr1, obj1, "contains")
     sg.add_edge(lr1, obj2, "contains")
@@ -254,3 +330,8 @@ if __name__ == "__main__":
     # Print
     print(sg.scene_graph.edges())
     print(sg.print_scene_graph(pretty=True))
+
+    import pdb
+    pdb.set_trace()
+    print(sg.print_sub_scene_graph(obj3))
+    

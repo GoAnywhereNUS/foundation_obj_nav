@@ -23,6 +23,7 @@ import habitat
 from controller import *
 
 import random
+import time
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -46,7 +47,9 @@ class NavigatorSimulation(Navigator):
         )
 
         self.scene_graph_specs = scene_graph_specs
-        self.llm_query_trial = 5
+        self.llm_max_qeury = 10
+        self.llm_sampling_query = 5
+
         self.defined_entrance = ['doorway', 'entrance', 'door frame']
         self.explored_node = []
         self.history = []
@@ -61,7 +64,27 @@ class NavigatorSimulation(Navigator):
         self.env = ObjNavEnv(habitat.Env(config=config), config)
         obs = self.env.reset()
 
-        
+        env_semantic_names = [s.category.name().lower() for s in self.env.env.sim.semantic_annotations().objects]
+        env_semantic_names = ['sofa' if x == 'couch' else x for x in env_semantic_names]
+        env_semantic_names = ['toilet' if x == 'toilet seat' else x for x in env_semantic_names]
+
+        self.semantic_annotations = env_semantic_names
+        self.goal = self.env.env.current_episode.object_category
+
+        self.action_step = 0
+        self.max_episode_step = 600
+        self.llm_loop_iter = 0
+        self.visualisation = True
+
+        self.controller = FMMController(device, env_config=self.config)
+        self.is_navigating = False
+        self.success_flag = False
+
+        self.trial_folder = create_log_folder()
+        self.action_log_path = os.path.join(self.trial_folder, 'action.txt')
+        self.llm.log_path = os.path.join(self.trial_folder, 'llm_query.log')
+
+
     def reset(self):
         self.explored_node = []
         self.history = []
@@ -71,6 +94,26 @@ class NavigatorSimulation(Navigator):
         self.scene_graph = SceneGraph(self.scene_graph_specs)
         self.llm.reset()
         self.last_subgoal = None
+
+        env_semantic_names = [s.category.name().lower() for s in self.env.env.sim.semantic_annotations().objects]
+        env_semantic_names = ['sofa' if x == 'couch' else x for x in env_semantic_names]
+        env_semantic_names = ['toilet' if x == 'toilet seat' else x for x in env_semantic_names]
+
+        self.semantic_annotations = env_semantic_names
+        self.goal = self.env.env.current_episode.object_category
+        
+        self.action_step = 0 
+        self.max_episode_step = 600
+        self.llm_loop_iter = 0
+        self.visualisation = True
+
+        self.controller = FMMController(device, env_config=self.config)
+        self.is_navigating = False
+        self.success_flag = False
+
+        self.trial_folder = create_log_folder()
+        self.action_log_path = os.path.join(self.trial_folder, 'action.txt')
+        self.llm.log_path = os.path.join(self.trial_folder, 'llm_query.log')
 
     def query_objects(self, image, suggested_objects=None):
         if suggested_objects is not None:
@@ -148,22 +191,13 @@ class NavigatorSimulation(Navigator):
             images: dict of images taken at current pose
         """
         obs = self.env.get_observation()
-        return {
-            'left': obs['left_rgb'],
-            'forward': obs['forward_rgb'],
-            'right': obs['right_rgb'],
-            'rear': obs['rear_rgb'],
-            'left_semantic': obs['left_semantic'],
-            'forward_semantic': obs['forward_semantic'],
-            'right_semantic': obs['right_semantic'],
-            'rear_semantic': obs['rear_semantic'],
-        }
+        return obs
 
     def perceive(self, images):
         image_locations = {}
         image_objects = {}
         for label in ['left', 'forward', 'right', 'rear']:
-            image = images[label]
+            image = images[label + '_rgb']
             image = Image.fromarray(image)
             location = self.query_vqa(image, "Which room is the photo?")
             image_locations[label] = (
@@ -190,6 +224,7 @@ class NavigatorSimulation(Navigator):
                         bbox_lst.append([min_x, min_y, max_x, max_y])
                         cropped_img_lst.append(image.crop(np.array([min_x,min_y,max_x,max_y])))
                 objects = (torch.tensor(bbox_lst), objlabel_lst, cropped_img_lst)
+            
             else:
                 if self.query_vqa(image, "Is there a door in the photo?") == 'yes':
                     objects = self.query_objects(image,  self.defined_entrance)
@@ -205,35 +240,35 @@ class NavigatorSimulation(Navigator):
 
     def perceive_location(self, images):
         image_locations = {}
-        for label in ['left', 'forward', 'right', 'rear']:
+        for label in ['left_rgb', 'forward_rgb', 'right_rgb', 'rear_rgb']:
             image = images[label]
             image = Image.fromarray(image)
             location = self.query_vqa(image, "Which room is the photo?")
             image_locations[label] = (
                 location.replace(" ", "") #clean space between "living room"
             )
-        obs_location = most_common([image_locations['forward'], image_locations['left'], image_locations['right'], image_locations['rear']])
+        obs_location = most_common([image_locations['forward_rgb'], image_locations['left_rgb'], image_locations['right_rgb'], image_locations['rear_rgb']])
         # TODO: Implement some reasonable fusion across all images
         return obs_location
 
     def generate_query(self, discript, goal, query_type):
         if query_type == 'plan':
             start_question = "You see the partial layout of the apartment:\n"
-            end_question = f"\nQuestion: Your goal is to find a {goal}. If any of the rooms in the layout are likely to contain the target object, reply the most probable room name, not any door name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found. Follow my format to state reasoning and sample answer. Please only use one word in sample answer."
+            end_question = f"\nQuestion: Your goal is to find a {goal}. If any of the rooms in the layout are likely to contain the target object, reply the most probable room name, not any door name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found. Follow my format to state reasoning and answer. Please only use one word in answer."
             explored_item_list = [x for x in self.explored_node if isinstance(x, str)]
             explored_query = "The following has been explored: " + "["+ ", ".join(list(set(explored_item_list))) + "]. Please dont reply explored place or object."
             whole_query = start_question + discript + end_question + explored_query
         elif query_type == 'classify':
             start_question = "There is a list:"
-            end_question = "Please eliminate redundant strings in the element from the list and classify them into \"room\", \"entrance\", and \"object\" classes. Ignore floor, ceiling and wall. Keep the number in the name. \nSample Answer:"
+            end_question = "Please eliminate redundant strings in the element from the list and classify them into \"room\", \"entrance\", and \"object\" classes. Ignore floor, ceiling and wall. Keep the number in the name. \nAnswer:"
             whole_query = start_question + discript + end_question
         elif query_type == 'local':
             start_question = "There is a list:"
-            end_question = f"Please select one object that is most likely located near a {goal}. Please only select one object in the list and use one word in sample answer."
+            end_question = f"Please select one object that is most likely located near a {goal}. Please only select one object in the list and use one word in answer."
             whole_query = start_question + discript + end_question
         elif query_type == 'state_estimation':
-            discript1 = "Depiction1: On the left, there is " + ", ".join(discript[0]['left']) + ". On the right, there is " + ", ".join(discript[0]['right']) + ". On the forward, there is " + ", ".join(discript[0]['forward']) + ". On the rear, there is " + ", ".join(discript[0]['rear']) + '\n'
-            discript2 = "Depiction2: On the left, there is " + ", ".join(discript[1]['left']) + ". On the right, there is " + ", ".join(discript[1]['right']) + ". On the forward, there is " + ", ".join(discript[1]['forward']) + ". On the rear, there is " + ", ".join(discript[1]['rear']) + '\n'
+            discript1 = "Depiction1: On the left, there is " + ", ".join(discript[0]['left']) + ". On the right, there is " + ", ".join(discript[0]['right']) + ". In front of me, there is " + ", ".join(discript[0]['forward']) + ". Behind me, there is " + ", ".join(discript[0]['rear']) + '\n'
+            discript2 = "Depiction2: On the left, there is " + ", ".join(discript[1]['left']) + ". On the right, there is " + ", ".join(discript[1]['right']) + ".In front of me, there is " + ", ".join(discript[1]['forward']) + ". Behind me, there is " + ", ".join(discript[1]['rear']) + '\n'
             question = "These are depictions of what I observe from two different vantage points. Please tell me if these two viewpoints correspond to the same room. It's important to note that the descriptions may originate from two positions within the room, each with a distinct angle. Therefore, the descriptions may pertain to the same room but not necessarily capture the same elements. Please be aware that my viewing angle varies, so it is not necessary for the elements to align in the same direction. As long as the relative positions between objects are accurate, it is considered acceptable. Please assess the arrangement of objects and identifiable features in the descriptions to determine whether these two positions are indeed in the same place. Provide a response of True or False, along with supporting reasons."
             whole_query = discript1 + discript2 + question
         return whole_query
@@ -275,25 +310,18 @@ class NavigatorSimulation(Navigator):
                 similar_room_description = self.scene_graph.get_node_attr(similar_room)['description']
                 similar_room_obj = self.scene_graph.get_obj_in_room(similar_room)
                 similar_room_obj_descript = self.query_detailed_descript(similar_room_obj)
-                #TODO: how to decide whether they are the same room? LLM query
-                # overlap = [element for element in similar_room_obj_descript if element in obj_label_descript]
 
-                # threshold = min(len(similar_room_obj_descript), len(obj_label_descript)) * 0.7
-                # is_similar = len(overlap) >= threshold
-                # print('Overlap', overlap, obj_label_descript, similar_room_obj_descript)
-                
                 store_ans = []
-                for i in range(self.llm_query_trial):
+                for i in range(self.llm_max_qeury):
                     whole_query = self.generate_query([room_descript, similar_room_description], None, 'state_estimation')
-                    chat_completion = self.llm.query_state_estimation(whole_query)
-                    complete_response = chat_completion.choices[0].message.content.lower()
-                    sample_response = complete_response[complete_response.find('sample answer:'):]
-                    seperate_ans = re.split('\n|; |, | |sample answer:', sample_response)
-                    seperate_ans = [i.replace('.','') for i in seperate_ans if i != '']
-                    if 'true' in seperate_ans[0]:
+                    answer = self.llm.query_state_estimation(whole_query)
+                    if 'true' in answer:
                         store_ans.append(1)
-                    elif 'false'in seperate_ans[0]:
+                    elif 'false'in answer:
                         store_ans.append(0)
+                    if len(store_ans) >= self.llm_sampling_query:
+                        break
+        
                 print("State Estimation:", store_ans)
 
                 is_similar = most_common(store_ans)
@@ -331,11 +359,7 @@ class NavigatorSimulation(Navigator):
         while attempts < 5:
             try:
                 # Query LLM to classify detected objects in 'room','entrance' and 'object' 
-                chat_completion = self.llm.query_object_class(whole_query)
-                complete_response = chat_completion.choices[0].message.content.lower()
-                complete_response = complete_response.replace(" ", "")
-                seperate_ans = re.split('\n|,|:', complete_response)
-                seperate_ans = [i.replace('.','') for i in seperate_ans if i != ''] 
+                seperate_ans = self.llm.query_object_class(whole_query)
 
                 room_idx = seperate_ans.index('room')
                 entrance_idx = seperate_ans.index('entrance')
@@ -363,9 +387,10 @@ class NavigatorSimulation(Navigator):
                 bb_idx = int(obj.split('_')[1])
             except:
                 continue
-            cropped_img_lst.append(cropped_imgs[bb_idx])
-            cleand_sensor_dir.append(idx_sensordirection[bb_idx])
-            cleaned_object_lst.append(obj)
+            if bb_idx < len(cropped_imgs): # in case LLM return index out of range
+                cropped_img_lst.append(cropped_imgs[bb_idx])
+                cleand_sensor_dir.append(idx_sensordirection[bb_idx])
+                cleaned_object_lst.append(obj)
         obs['cleaned_object'] = cleaned_object_lst
         obs['cleaned_object_cropped_img'] = cropped_img_lst
         obs['cleand_sensor_dir'] = cleand_sensor_dir
@@ -389,6 +414,7 @@ class NavigatorSimulation(Navigator):
                         entrance_name = item.split('_')[0]
                         bb_idx = int(item.split('_')[1])
                         sensor_dir = idx_sensordirection[bb_idx]
+                        #TODO: how to choose the last entrance image
                         if sensor_dir == 'rear':
                             entrance_lst[idx] =  'LAST' + entrance_lst[idx]
                             break
@@ -465,33 +491,22 @@ class NavigatorSimulation(Navigator):
                 self.path = [obj]
                 return self.path
 
-        Scene_Discript = self.scene_graph.print_scene_graph(pretty=False)
+        Scene_Discript = self.scene_graph.print_sub_scene_graph(selected_node = self.current_state, pretty=False)
         whole_query = self.generate_query(Scene_Discript, goal, 'plan')
 
-        # query LLm for llm_query_trial times and select most common answer
-        for i in range(self.llm_query_trial):
-            chat_completion = self.llm.query(whole_query)
-            complete_response = chat_completion.choices[0].message.content.lower()
-            sample_response = complete_response[complete_response.find('sample answer:'):]
-            seperate_ans = re.split('\n|; |, | |sample answer:', sample_response)
-            seperate_ans = [i.replace('.','') for i in seperate_ans if i != ''] # to make sink. to sink
-            if len(seperate_ans) > 0:
+        for i in range(self.llm_max_qeury):
+            seperate_ans = self.llm.query(whole_query)
+            if len(seperate_ans) > 0 and seperate_ans[0] in self.scene_graph.nodes():
                 store_ans.append(seperate_ans[0])
+            if len(store_ans)  >= self.llm_sampling_query:
+                break
         
         # use whole lopp to choose the most common goal name that is in the scene graph
         print('[PLAN INFO] Receving Ans from LLM:', store_ans)
 
         store_ans_copy = store_ans.copy()
         goal_node_name = most_common(store_ans)
-        # TODO: If the ans is not any valid node in sene graph, error
-        while goal_node_name not in self.scene_graph.nodes():
-            store_ans = [i for i in store_ans if i != goal_node_name]
-            if len(store_ans) == 0:
-                print(f'PLAN: cannot find a valid goal node name. Answer Store: {store_ans_copy}')
-                print('ERROR')
-                break
-            goal_node_name = most_common(store_ans)
-        
+
         print(f'[PLAN INFO] current state:{self.current_state}, goal state:{goal_node_name}')
 
         ########### End Query LLM for Plan #################
@@ -506,24 +521,14 @@ class NavigatorSimulation(Navigator):
             whole_query = self.generate_query(sg_obj_Discript, goal, 'local')
             
             store_ans = []
-            for i in range(self.llm_query_trial):
-                chat_completion = self.llm.query_local_explore(whole_query)
-                complete_response = chat_completion.choices[0].message.content.lower()
-                sample_response = complete_response[complete_response.find('sample answer:'):]
-                seperate_ans = re.split('\n|; |, | |sample answer:', sample_response)
-                seperate_ans = [i.replace('.','') for i in seperate_ans if i != '']
-                if '_' in seperate_ans[0]:
-                    store_ans.append(seperate_ans[0]) # ans should be separate_ans[0]
+            for i in range(self.llm_max_qeury):
+                seperate_ans = self.llm.query_local_explore(whole_query)
+                if len(seperate_ans) > 0 and seperate_ans[0] in self.scene_graph.nodes():
+                    store_ans.append(seperate_ans[0])
+                if len(store_ans)  >= self.llm_sampling_query:
+                    break
             
             goal_node_name = most_common(store_ans)
-            while goal_node_name not in self.scene_graph.nodes():
-                store_ans = [i for i in store_ans if i != goal_node_name]
-                if len(store_ans) == 0:
-                    print(f'PLAN: cannot find a valid goal node name. Answer Store: {store_ans_copy}')
-                    print('ERROR')
-                    break
-                goal_node_name = most_common(store_ans)
-        
             path = [goal_node_name]
         
         # if next ubgoal is entrance, we mark it.
@@ -546,42 +551,134 @@ class NavigatorSimulation(Navigator):
         next_position = self.scene_graph.get_node_attr(next_goal)['bbox'].type(torch.int64).tolist()
         cam_uuid = self.scene_graph.get_node_attr(next_goal)['cam_uuid']+'_depth'
         return next_goal, next_position, cam_uuid
-    
+
+    def visualise_objects(self, obs, img_lang_obs):
+        for direction in ['forward', 'left', 'right', 'rear']:
+            obs_rgb = obs[direction + '_rgb']
+            plt.imshow(obs_rgb.squeeze())
+            ax = plt.gca()
+            for i in range(len(img_lang_obs['object'][direction][1])):
+                label = img_lang_obs['object'][direction][1][i]
+                min_x, min_y, max_x, max_y = img_lang_obs['object'][direction][0][i]
+                if self.goal in label:
+                    ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='red', facecolor=(0,0,0,0), lw=2))
+                else:
+                    ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
+                ax.text(min_x, min_y, label)
+            plt.savefig(self.trial_folder + '/'  +  time.strftime("%Y%m%d%H%M%S") + "_" + direction + ".png")
+            plt.clf()
+            
     def has_reached_subgoal(self, state, subgoal):
         raise NotImplementedError
     
     def send_navigation_subgoal(self, subgoal):
         raise NotImplementedError
 
-    def loop(self):
+    def loop(self, obs):
         """
         Single iteration of the navigation loop
 
         Returns:
             None
         """
-        if self.is_navigating:
-            return
+        action_logging = open(self.action_log_path, "a")
         
-        # Get "observations" from VLMs
-        image_lang_obs = self.observe()
+        if self.is_navigating == False:
+            self.llm_loop_iter += 1  
 
-        # Localise and update scene graph
-        state = self.estimate_state(self, image_lang_obs)
-        state = self.update_scene_graph(state, image_lang_obs)
-        self.current_state = state
+            # Observe
+            action_logging.write(f'--------- Loop {self.llm_loop_iter} -----------\n')
+            
+            
+            print('------------  Receive Lang Obs   -------------')
+            img_lang_obs = self.perceive(obs)
+            location = img_lang_obs['location']
+            obj_lst = img_lang_obs['object']
+        
+            print(f'Location: {location}\nObjecet: {obj_lst}')
+            obj_label_tmp = ['forward'] + img_lang_obs['object']['forward'][1] + ['left'] + img_lang_obs['object']['left'][1] + ['right'] + img_lang_obs['object']['right'][1] + ['rear'] + img_lang_obs['object']['rear'][1]
+            action_logging.write(f'[Obs]: Location: {location}\nObjecet: {obj_label_tmp}\n')
+            
+            for direction in ['forward', 'left', 'right', 'rear']:
+                for i in range(len(img_lang_obs['object'][direction][1])):
+                    label = img_lang_obs['object'][direction][1][i]
+                    if self.goal in label:
+                        next_position = img_lang_obs['object'][direction][0][i].type(torch.int64).tolist()
+                        cam_uuid = direction +'_depth'
+                        self.controller.set_subgoal_image(next_position, cam_uuid, obs, get_camera_matrix(640, 480, 90))
+                        self.is_navigating = True
+                        self.last_subgoal = self.goal
+                        return
+            
+            if self.visualisation:
+                self.visualise_objects(obs,img_lang_obs)
 
-        # If not currently executing a plan, get new plan from LLM.
-        # If currently executing a plan, get next subgoal if we have
-        # successfully executed current subgoal, else re-plan with LLM.
-        if self.plan is None or not self.has_reached_subgoal(state, self.last_subgoal):
-            self.plan = self.plan_path()
-        next_subgoal = self.plan[-1]
+            # Update
+            self.update_scene_graph(img_lang_obs)
+            print('------------  Update Scene Graph   -------------')
+            scene_graph_str = self.scene_graph.print_scene_graph(pretty=False,skip_object=False)
+        
+            print(scene_graph_str)
+            action_logging.write(f'Scene Graph: {scene_graph_str}\n')
 
-        self.is_navigating = True
-        self.send_navigation_subgoal(next_subgoal)
-        self.plan.pop()
+            # Plan
+            print('-------------  Plan Path --------------')
+            path = self.plan_path(self.goal)
+            next_goal, next_position, cam_uuid = self.ground_plan_to_bbox()
+            
+            print(f'Path: {path}\n Next Goal: {next_goal}')
+            action_logging.write(f'Path: {path}, Next Goal: {next_goal}\n')
 
+            if self.visualisation:
+                min_x, min_y, max_x, max_y = next_position
+
+                plt.imshow(obs[cam_uuid[:-5]+'rgb'].squeeze())
+                ax = plt.gca()
+                ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
+                plt.savefig(self.trial_folder + '/'  + time.strftime("%Y%m%d%H%M") + "_chosen_rgb_" + str(cam_uuid[:-6]) + ".png")
+                plt.clf()
+
+                plt.imshow(obs[cam_uuid[:-5]+'depth'].squeeze())
+                ax = plt.gca()
+                ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
+                plt.savefig(self.trial_folder + '/'  + time.strftime("%Y%m%d%H%M") + "_chosen_depth_" + str(cam_uuid[:-6]) + ".png")
+                plt.clf()
+
+            self.controller.set_subgoal_image(next_position, cam_uuid, obs, get_camera_matrix(640, 480, 90))
+            self.is_navigating = True
+        else:
+            action, stop = self.controller.step()
+            if stop or action == None:
+                self.is_navigating = False
+                self.explored_node.append(self.last_subgoal)
+                
+                img_lang_obs = self.perceive(obs)
+                location = img_lang_obs['location']
+                obj_lst = img_lang_obs['object']
+                obj_label_tmp = ['forward'] + img_lang_obs['object']['forward'][1] + ['left'] + img_lang_obs['object']['left'][1] + ['right'] + img_lang_obs['object']['right'][1] + ['rear'] + img_lang_obs['object']['rear'][1]
+
+                action_logging.write(f"[Action]: Reach the point\n")
+                if self.last_subgoal == self.goal:
+                    action_logging.write(f"[END]: SUCCESS\n")
+                    self.success_flag = True
+                    if self.visualisation:
+                        self.visualise_objects(obs, img_lang_obs)
+            else:
+                print("(Auto) Action:", action)
+                self.env.act(action)
+                self.action_step += 1
+
+                current_loc = self.perceive_location(obs)
+                self.history.append(current_loc)
+                print(f'Current Loc: {current_loc}') 
+                action_logging.write(f"[Action]: {action}\n")
+                action_logging.write(f'[Pos]: {self.env.env.sim.agents[0].get_state().position} [Rotation]: {self.env.env.sim.agents[0].get_state().rotation} \n')
+
+                if self.action_step >= self.max_episode_step:
+                    action_logging.write(f"[END]: FAIL\n")
+                
+        action_logging.close()
+    
     def run(self):
         """
         Executes the navigation loop. To be implemented in each
@@ -590,8 +687,24 @@ class NavigatorSimulation(Navigator):
         Returns:
             None
         """
-        raise NotImplementedError
+        action_logging = open(self.action_log_path, "a")
+        action_logging.write(f'[EPISODE ID]: {self.env.env.current_episode.episode_id}\n')
+        action_logging.write(f'[SCNEN ID]: {self.env.env.current_episode.scene_id}\n')
+        action_logging.write(f'[GOAL]: {self.goal}\n')
+        action_logging.close()
 
+        cv2.namedWindow("Images")
+        while (self.action_step < self.max_episode_step) and (self.success_flag == False):
+            obs = self._observe()
+            t1 = time.time()
+            self.controller.update(obs)
+            images = self.controller.visualise(obs)
+            cv2.imshow("Images", images)    
+            cv2.waitKey(1)
+            print('Pos', self.env.env.sim.agents[0].get_state().position)
+            self.loop(obs)
+        
+        cv2.destroyAllWindows()
 
 def create_log_folder(log_folder = 'logs'):
     logs_folder = 'logs'
@@ -604,13 +717,19 @@ def create_log_folder(log_folder = 'logs'):
     # Extract the numbers and find the maximum
     numbers = [int(folder.split("_")[1]) for folder in trial_folders]
     max_number = max(numbers, default=0)
-    trial = max_number + 1
-
-    trial_folder = os.path.join(logs_folder, 'trial_' + str(trial))
-    if not os.path.exists(trial_folder):
-        os.makedirs(trial_folder)
     
-    return trial_folder
+    current_trial_folder = os.path.join(logs_folder, 'trial_' + str(max_number))
+    if not os.listdir(current_trial_folder):
+        return current_trial_folder
+    else:
+        trial = max_number + 1
+        trial_folder = os.path.join(logs_folder, 'trial_' + str(trial))
+        if not os.path.exists(trial_folder):
+            os.makedirs(trial_folder)
+        
+        return trial_folder
+
+
 
 if __name__ == "__main__":
 
@@ -621,196 +740,18 @@ if __name__ == "__main__":
 
     device = torch.device('cuda:0')
 
-    trial_folder = create_log_folder()
-    action_log_path = os.path.join(trial_folder, 'action.txt')
     nav = NavigatorSimulation()
-
     
     first_time = True
     test_history = []
 
     while True:
-        if first_time == True:
-            first_time = False
-        else:
-            trial_folder = create_log_folder()
-            action_log_path = os.path.join(trial_folder, 'action.txt')
-        # scene_episode_id = nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id
-        
-        while nav.env.env.current_episode.episode_id not in ['0'] or ((nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id) in test_history):
+        scene_episode =  nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id 
+        while nav.env.env.current_episode.episode_id not in ['0'] or (scene_episode in test_history):
             try:
                 print('RESET', nav.env.env.current_episode.episode_id,nav.env.env.current_episode.scene_id )
                 nav.reset()
             except:
                 sys.exit(0)
-        
-
-
-        test_history.append( nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id )
-        controller = FMMController(device, env_config=nav.config)
-
-        env_semantic_names = [s.category.name().lower() for s in nav.env.env.sim.semantic_annotations().objects]
-        env_semantic_names = ['sofa' if x == 'couch' else x for x in env_semantic_names]
-        env_semantic_names = ['toilet' if x == 'toilet seat' else x for x in env_semantic_names]
-
-        nav.semantic_annotations = env_semantic_names
-
-        goal = nav.env.env.current_episode.object_category
-        if goal not in env_semantic_names:
-            if goal == 'tv_monitor':
-                goal = 'tv'
-
-        # goal_candidate =['chair', 'couch', 'plant', 'bed', 'toilet', 'tv']
-        # # goal = random.choice(goal_candidate)
-        # goal = 'couch'
-        # while goal not in env_semantic_names:
-        #     goal = random.choice(goal_candidate)
-        # print('Goal', goal)
-        
-        with open(action_log_path, 'a') as file:
-            file.write(f'[EPISODE ID]: {nav.env.env.current_episode.episode_id}\n')
-            file.write(f'[SCNEN ID]: {nav.env.env.current_episode.scene_id}\n')
-            file.write(f'[GOAL]: {goal}\n')
-            obs = nav.env.get_observation()
-            x = obs['gps'][0]
-            y = obs['gps'][1]
-            z = math.degrees(obs['compass'])
-            file.write(f'[Pos]: {nav.env.env.sim.agents[0].get_state().position} [Rotation]: {nav.env.env.sim.agents[0].get_state().rotation} \n')
-        
-        cv2.namedWindow("Images")
-        auto = False
-        updated = True
-        cv2.waitKey(1)
-        import time
-        
-        loop_iter = 0
-        step = 0
-
-        while True:
-            obs = nav.env.get_observation()
-            t1 = time.time()
-            controller.update(obs)
-            images = controller.visualise(obs)
-            cv2.imshow("Images", images)
-            images = nav._observe()     
-            cv2.waitKey(1)
-            print('Pos', nav.env.env.sim.agents[0].get_state().position)
-
-            if auto == False:
-
-                if loop_iter > 30 or step > 600:
-                    with open(action_log_path, 'a') as file:
-                        file.write(f"[END]: FAIL\n")
-                    break
-
-                loop_iter += 1
-                # Observe
-                with open(action_log_path, 'a') as file:
-                    file.write(f'--------- Loop {loop_iter} -----------\n')
-                img_lang_obs = nav.perceive(images)
-                print('------------  Receive Lang Obs   -------------')
-                location = img_lang_obs['location']
-                obj_lst = img_lang_obs['object']
-            
-                print(f'Location: {location}\nObjecet: {obj_lst}')
-                obj_label_tmp = ['forward'] + img_lang_obs['object']['forward'][1] + ['left'] + img_lang_obs['object']['left'][1] + ['right'] + img_lang_obs['object']['right'][1] + ['rear'] + img_lang_obs['object']['rear'][1]
-
-                with open(action_log_path, 'a') as file:
-                    file.write(f'[Obs]: Location: {location}\nObjecet: {obj_label_tmp}\n')
-                for direction in ['forward', 'left', 'right', 'rear']:
-                    obs_rgb = images[direction]
-                    plt.imshow(obs_rgb.squeeze())
-                    ax = plt.gca()
-                    for i in range(len(img_lang_obs['object'][direction][1])):
-                        label = img_lang_obs['object'][direction][1][i]
-                        min_x, min_y, max_x, max_y = img_lang_obs['object'][direction][0][i]
-                        ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
-                        ax.text(min_x, min_y, label)
-                    plt.savefig(trial_folder + '/'  +  time.strftime("%Y%m%d%H%M%S") + "_" + direction + ".png")
-                    plt.clf()
-
-                # Update
-                nav.update_scene_graph(img_lang_obs)
-                print('------------  Update Scene Graph   -------------')
-                scene_graph_str = nav.scene_graph.print_scene_graph(pretty=False,skip_object=False)
-                print(scene_graph_str)
-
-                with open(action_log_path, 'a') as file:
-                    file.write(f'Scene Graph: {scene_graph_str}\n')
-
-                # Plan
-                print('-------------  Plan Path --------------')
-                path = nav.plan_path(goal)
-                next_goal, next_position, cam_uuid = nav.ground_plan_to_bbox()
-                
-                print(f'Path: {path}\n Next Goal: {next_goal}')
-                with open(action_log_path, 'a') as file:
-                    file.write(f'Path: {path}, Next Goal: {next_goal}\n')
-
-                min_x, min_y, max_x, max_y = next_position
-
-                plt.imshow(obs[cam_uuid[:-5]+'rgb'].squeeze())
-                ax = plt.gca()
-                ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
-                plt.savefig(trial_folder + '/'  + time.strftime("%Y%m%d%H%M") + "_chosen_rgb_" + str(cam_uuid[:-6]) + ".png")
-                plt.clf()
-
-                plt.imshow(obs[cam_uuid[:-5]+'depth'].squeeze())
-                ax = plt.gca()
-                ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
-                plt.savefig(trial_folder + '/'  + time.strftime("%Y%m%d%H%M") + "_chosen_depth_" + str(cam_uuid[:-6]) + ".png")
-                plt.clf()
-
-                controller.set_subgoal_image(next_position, cam_uuid, obs, get_camera_matrix(640, 480, 90))
-                auto = True
-                
-            # Action
-            else:
-                action, stop = controller.step()
-                if stop or action == None:
-                    auto = False
-                    nav.explored_node.append(nav.last_subgoal)
-                    img_lang_obs = nav.perceive(images)
-                    location = img_lang_obs['location']
-                    obj_lst = img_lang_obs['object']
-                    obj_label_tmp = ['forward'] + img_lang_obs['object']['forward'][1] + ['left'] + img_lang_obs['object']['left'][1] + ['right'] + img_lang_obs['object']['right'][1] + ['rear'] + img_lang_obs['object']['rear'][1]
-                    succeed_flag = False
-                    with open(action_log_path, 'a') as file:
-                        file.write(f"[Action]: Reach the point\n")
-                        for obj in obj_label_tmp:
-                            if goal in obj:
-                                file.write(f"[END]: SUCCESS\n")
-                                succeed_flag = True
-                                for direction in ['forward', 'left', 'right', 'rear']:
-                                    obs_rgb = images[direction]
-                                    plt.imshow(obs_rgb.squeeze())
-                                    ax = plt.gca()
-                                    for i in range(len(img_lang_obs['object'][direction][1])):
-                                        label = img_lang_obs['object'][direction][1][i]
-                                        min_x, min_y, max_x, max_y = img_lang_obs['object'][direction][0][i]
-                                        if goal in label:
-                                            ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='red', facecolor=(0,0,0,0), lw=2))
-                                        else:
-                                            ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
-                                        ax.text(min_x, min_y, label)
-                                    plt.savefig(trial_folder + '/'  +  time.strftime("%Y%m%d%H%M%S") + "_" + direction + "end.png")
-                                    plt.clf()
-                                break
-                    if succeed_flag:
-                        break
-                else:
-                    print("(Auto) Action:", action)
-                    nav.env.act(action)
-                    step += 1
-
-                    if step > 600:
-                        with open(action_log_path, 'a') as file:
-                            file.write(f"[END]: FAIL\n")
-                        break
-                    current_loc = nav.perceive_location(images)
-                    nav.history.append(current_loc)
-                    print(f'Current Loc: {current_loc}') 
-                    with open(action_log_path, 'a') as file:
-                        file.write(f"[Action]: {action}\n")
-                        file.write(f'[Pos]: {nav.env.env.sim.agents[0].get_state().position} [Rotation]: {nav.env.env.sim.agents[0].get_state().rotation} \n')
-        cv2.destroyAllWindows()
+        test_history.append(scene_episode)
+        nav.run()
