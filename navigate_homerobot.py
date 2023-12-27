@@ -106,16 +106,29 @@ class NavigatorHomeRobot(Navigator):
         self.action_logging.write(f'[SCENE ID]: {self.env.env.current_episode.scene_id}\n')
         self.action_logging.write(f'[GOAL]: {self.goal}\n')
 
-        cv2.namedWindow("Images")
+        cv2.namedWindow("View")
 
         while (self.action_step < self.max_episode_step) and (not self.success_flag):
             obs = self._observe()
+            self.controller.update(obs)
+            images = self.controller.visualise(obs)
+            cv2.imshow("View", images)
+            cv2.waitKey(10)
 
             # High-level perception-reasoning. Run when we have 
             # paused and are awaiting next instructions.
-            subgoal = None
+            subgoal_position = None
             if not self.controller_active:
-                subgoal = self.loop(obs)
+                subgoal_position, cam_uuid = self.loop(obs)
+
+                if subgoal_position is not None:
+                    self.controller.set_subgoal_image(
+                        subgoal_position,
+                        cam_uuid,
+                        obs,
+                        get_camera_matrix(640, 480, 90)
+                    )
+                    self.controller_active = True
 
             # Low-level perception-reasoning. Run all the time.
             # TODO:
@@ -123,26 +136,27 @@ class NavigatorHomeRobot(Navigator):
             # Update and handle controller. Set subgoal if
             # issued by perception-reasoning, otherwise continue
             # to navigate with the controller
-            self.controller.update(obs)
-
-            if subgoal is not None:
-                self.controller.set_subgoal_image(
-                    subgoal,
-                    cam_uuid,
-                    obs,
-                    get_camera_matrix(640, 480, 90)
-                )
-                self.controller_active = True
 
             if self.controller_active:
                 action, success = self.controller.step()
                 if action is None:
                     self.controller_active = False
-                # TODO: Does any feedback need to be given to perception-reasoning?
+                    if self.last_subgoal == self.goal:
+                        self.success_flag = True
+                        self.action_logging.write(f"[END]: SUCCESS\n")
+                else:
+                    print("(Auto) Action:", action)
+                    self.env.act(action)
+                    self.action_step += 1
 
-            images = self.controller.visualise(obs)
-            cv2.imshow("View", images)
-            cv2.waitKey(10)
+                    self.action_logging.write(f"[Action]: {action}\n")
+                    self.action_logging.write(f'[Pos]: {self.env.env.sim.agents[0].get_state().position} [Rotation]: {self.env.env.sim.agents[0].get_state().rotation} \n')
+
+                    if self.action_step >= self.max_episode_step:
+                        self.action_logging.write(f"[END]: FAIL\n")
+
+                # TODO: Does any feedback need to be given to perception-reasoning?
+            
             print('Pos:', self.env.env.sim.agents[0].get_state().position)
 
         cv2.destroyAllWindows()
@@ -150,15 +164,14 @@ class NavigatorHomeRobot(Navigator):
 if __name__ == "__main__":
     nav = NavigatorHomeRobot()
     nav.reset()
-    
+    test_episode = 2
     test_history = []
     while True:
-        scene_episode =  nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id 
-        while nav.env.env.current_episode.episode_id not in ['0'] or (scene_episode in test_history):
+        while nav.env.env.current_episode.episode_id not in [str(i) for i in range(test_episode)] or ((nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id ) in test_history):
             try:
                 print('RESET', nav.env.env.current_episode.episode_id,nav.env.env.current_episode.scene_id )
                 nav.reset()
             except:
                 sys.exit(0)
-        test_history.append(scene_episode)
+        test_history.append(nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id )
         nav.run()

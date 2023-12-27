@@ -143,12 +143,12 @@ entrance: none
 object: mirror_1, sink_2, toilet_3, bathtub_4, lamp_5"""
 #############################
 
-LOCAL_EXP_USER_EXAMPLE_1 = """There is a list: ["mirror_2", "lamp_1", "picture_7", "tool_6","toilet_8","sofa_11", "floor_12", "wall_13"]. Please select one object that is most likely located near a sink."""
+LOCAL_EXP_USER_EXAMPLE_1 = """There is a list: ["mirror_2", "lamp_1", "picture_7", "tool_6","toilet_8","sofa_11", "floor_12", "wall_13"]. Please select one object that is most likely located near a sink. Always follow the format: Answer: <your answer>."""
 
 LOCAL_EXP_AGENT_EXAMPLE_1 = """Reasoning: Among the given options, the object most likely located near a sink is a "mirror." Mirrors are commonly found near sinks in bathrooms for personal grooming and hygiene activities.
 Answer: mirror_2"""
 
-LOCAL_EXP_USER_EXAMPLE_2 = """There is a list: ["chair_4", "sofa_2", "bed_9", "dresser_1","ceiling_6","closet_5", "window_7", "wall_10"]. Please select one object that is most likely located near a table."""
+LOCAL_EXP_USER_EXAMPLE_2 = """There is a list: ["chair_4", "sofa_2", "bed_9", "dresser_1","ceiling_6","closet_5", "window_7", "wall_10"]. Please select one object that is most likely located near a table. Always follow the format: Answer: <your answer>."""
 
 LOCAL_EXP_AGENT_EXAMPLE_2 = """Reasoning: Among the given options, the object most likely located near a table is a "chair." Chairs are commonly placed around tables for seating during various activities such as dining, working, or socializing.
 Answer: chair_4"""
@@ -363,7 +363,7 @@ class GPTInterface(LLMInterface):
         sample_response = complete_response[complete_response.find('answer:'):]
         seperate_ans = re.split('\n|; |, | |answer:', sample_response)
         seperate_ans = [i.replace('.','') for i in seperate_ans if i != '']
-        print(complete_response)
+        # print(complete_response)
         if len(seperate_ans) > 0:
             cleaned_ans = seperate_ans[0]
         else:

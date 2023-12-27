@@ -226,7 +226,7 @@ class Navigator:
             whole_query = start_question + discript + end_question
         elif query_type == 'local':
             start_question = "There is a list:"
-            end_question = f"Please select one object that is most likely located near a {goal}. Please only select one object in the list and use one word in answer."
+            end_question = f"Please select one object that is most likely located near a {goal}. Please only select one object in the list and use one word in answer. Always follow the format: Answer: <your answer>."
             whole_query = start_question + discript + end_question
         elif query_type == 'state_estimation':
             discript1 = "Depiction1: On the left, there is " + ", ".join(discript[0]['left']) + ". On the right, there is " + ", ".join(discript[0]['right']) + ". In front of me, there is " + ", ".join(discript[0]['forward']) + ". Behind me, there is " + ", ".join(discript[0]['rear']) + '\n'
@@ -366,20 +366,24 @@ class Navigator:
             print(f'Existing node: {self.current_state}')
         else:
             self.current_state = self.scene_graph.add_node("room", obs_location, {"image": np.random.rand(4, 4), "description": room_description})
-            if self.last_subgoal != None and self.scene_graph.is_type(self.last_subgoal, 'entrance'):
-                self.scene_graph.add_edge(self.current_state, self.last_subgoal, "connects to")
-                self.explored_node.append(self.last_subgoal)
-                for idx, item in enumerate(entrance_lst):
-                    if item == 'none':
-                        continue
-                    if '_' in item:
-                        entrance_name = item.split('_')[0]
-                        bb_idx = int(item.split('_')[1])
-                        sensor_dir = idx_sensordirection[bb_idx]
-                        #TODO: how to choose the last entrance image
-                        if sensor_dir == 'rear':
-                            entrance_lst[idx] =  'LAST' + entrance_lst[idx]
-                            break
+            if self.last_subgoal != None:
+                if self.scene_graph.is_type(self.last_subgoal, 'entrance'):
+                    self.scene_graph.add_edge(self.current_state, self.last_subgoal, "connects to")
+                    self.explored_node.append(self.last_subgoal)
+                    for idx, item in enumerate(entrance_lst):
+                        if item == 'none':
+                            continue
+                        if '_' in item:
+                            entrance_name = item.split('_')[0]
+                            bb_idx = int(item.split('_')[1])
+                            sensor_dir = idx_sensordirection[bb_idx]
+                            #TODO: how to choose the last entrance image
+                            if sensor_dir == 'rear':
+                                entrance_lst[idx] =  'LAST' + entrance_lst[idx]
+                                break
+                elif self.scene_graph.is_type(self.last_subgoal, 'room'):
+                    self.scene_graph.add_edge(self.current_state, self.last_subgoal, "connects to")
+                    self.explored_node.append(self.last_subgoal)
             print(f'Add new node: {self.current_state}')
 
         room_lst_scene_graph = self.scene_graph.get_secific_type_nodes('room')
@@ -416,7 +420,7 @@ class Navigator:
                     sensor_dir = idx_sensordirection[bb_idx] # get the sensor direction for this entrance
                     if 'LAST' in item:
                         temp_entrance = self.last_subgoal
-                        self.scene_graph.nodes()[temp_entrance]['cam_uuid'] = cropped_imgs[bb_idx]
+                        self.scene_graph.nodes()[temp_entrance]['image'] = cropped_imgs[bb_idx]
                         self.scene_graph.nodes()[temp_entrance]['bbox'] = obj_bbox[bb_idx]
                         self.scene_graph.nodes()[temp_entrance]['cam_uuid'] = sensor_dir
                     else:
@@ -485,8 +489,11 @@ class Navigator:
             store_ans = []
             for i in range(self.llm_max_query):
                 seperate_ans = self.llm.query_local_explore(whole_query)
-                if len(seperate_ans) > 0 and seperate_ans[0] in self.scene_graph.nodes():
-                    store_ans.append(seperate_ans[0])
+                if len(seperate_ans) > 0:
+                    if seperate_ans[0] in self.scene_graph.nodes():
+                        store_ans.append(seperate_ans[0])
+                    elif seperate_ans[-1] in self.scene_graph.nodes():
+                         store_ans.append(seperate_ans[-1])
                 if len(store_ans)  >= self.llm_sampling_query:
                     break
             
@@ -535,18 +542,13 @@ class Navigator:
             for i in range(len(img_lang_obs['object'][direction][1])):
                 label = img_lang_obs['object'][direction][1][i]
                 if self.goal in label:
-                    # TODO: Review this. Do not interact with the controller. This is a low-level
-                    # perception-reasoning loop, that should provide some intermediate output
-                    # to command the even lower-level perception-control loop.
-                    pass
-
-                    # next_position = img_lang_obs['object'][direction][0][i].type(torch.int64).tolist()
-                    # cam_uuid = direction +'_depth'
-                    # self.controller.set_subgoal_image(next_position, cam_uuid, obs, get_camera_matrix(640, 480, 90))
-                    # self.last_subgoal = self.goal
-                    # return True
-        return False
-
+                    next_position = img_lang_obs['object'][direction][0][i].type(torch.int64).tolist()
+                    cam_uuid = direction +'_depth'
+                    self.is_navigating = True
+                    self.last_subgoal = self.goal
+                    return True, next_position, cam_uuid
+        return False, None, None
+    
     def create_log_folder(log_folder = 'logs'):
         logs_folder = 'logs'
 
@@ -573,6 +575,13 @@ class Navigator:
         os.makedirs(trial_folder)
         return trial_folder
 
+    def ground_plan_to_bbox(self):
+        next_goal = self.last_subgoal
+        print('Next Subgoal:', next_goal, self.scene_graph.scene_graph[next_goal])
+        next_position = self.scene_graph.get_node_attr(next_goal)['bbox'].type(torch.int64).tolist()
+        cam_uuid = self.scene_graph.get_node_attr(next_goal)['cam_uuid']+'_depth'
+        return next_goal, next_position, cam_uuid
+
     def loop(self, obs):
         """
         Single iteration of high-level perception-reasoning loop for navigation.
@@ -580,6 +589,8 @@ class Navigator:
         Returns:
             None
         """
+        self.llm_loop_iter += 1
+
         # Observe
         self.action_logging.write(f'--------- Loop {self.llm_loop_iter} -----------\n')
         print('------------  Receive Lang Obs   -------------')
@@ -587,6 +598,10 @@ class Navigator:
 
         if self.visualisation:
             self.visualise_objects(obs, img_lang_obs)
+
+        find_goal_flag, potenrial_next_pos, potenrial_cam_uuid = self.check_current_obs(obs, img_lang_obs)
+        if find_goal_flag:
+            return potenrial_next_pos, potenrial_cam_uuid
 
         # Update
         self.update_scene_graph(img_lang_obs)
@@ -600,11 +615,31 @@ class Navigator:
         path = self.plan_path(self.goal)
         self.is_navigating = True
 
+        next_goal, next_position, cam_uuid = self.ground_plan_to_bbox()
+        self.action_logging.write(f'Path: {path}, Next Goal: {next_goal}\n')
+
+        if self.visualisation:
+            min_x, min_y, max_x, max_y = next_position
+
+            plt.imshow(obs[cam_uuid[:-5]+'rgb'].squeeze())
+            ax = plt.gca()
+            ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
+            ax.text(min_x, min_y, next_goal)
+            plt.savefig(self.trial_folder + '/'  + time.strftime("%Y%m%d%H%M%S") + "_chosen_rgb_" + str(cam_uuid[:-6]) + ".png")
+            plt.clf()
+
+            plt.imshow(obs[cam_uuid[:-5]+'depth'].squeeze())
+            ax = plt.gca()
+            ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
+            ax.text(min_x, min_y, next_goal)
+            plt.savefig(self.trial_folder + '/'  + time.strftime("%Y%m%d%H%M%S") + "_chosen_depth_" + str(cam_uuid[:-6]) + ".png")
+            plt.clf()
+
         if len(path) > 1:
             next_goal = path[1]
         else:
             next_goal = path[0]
-        return next_goal
+        return next_position, cam_uuid 
 
     def run(self):
         """
