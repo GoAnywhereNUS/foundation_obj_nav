@@ -2,6 +2,7 @@ import math
 import torch
 import numpy as np
 from enum import Enum
+from controller_interface import Controller
 from utils.mapper import Mapper
 from utils.fmm_planner import FMMPlanner
 from utils.habitat_utils import ObjNavEnv, setup_env_config, sensor_config_dict
@@ -31,63 +32,6 @@ from home_robot.utils.depth import (
 )
 import cv2
 
-class Controller:
-    def __init__(
-        self, 
-        device=torch.device('cuda:0')
-    ):
-        self.curr_goal = None
-        self.device = device
-
-    def set_subgoal_coord(self, subgoal, obs=None):
-        """
-        Set the controller's current subgoal as coordinates in world frame. 
-        If needed, the controller can take in current sensor observations 
-        to ground the subgoal.
-        """
-        raise NotImplementedError
-    
-    def set_subgoal_image(self, subgoal, obs):
-        """
-        Set the controller's current subgoal as an image crop.
-        """
-        raise NotImplementedError
-    
-    def reset(self):
-        """
-        Clears controller state
-        """
-        raise NotImplementedError
-    
-    def reset_subgoal(self):
-        """
-        Clears the previously set subgoal and resets state.
-        """
-        raise NotImplementedError
-    
-    def step(self):
-        """
-        Plans a path toward the set goal, and takes a step towards it.
-        """
-        raise NotImplementedError
-    
-    def update(self, obs):
-        """
-        Update the internal map from observations.
-        """
-        raise NotImplementedError
-    
-    def visualise(self, obs):
-        """
-        Visualise the observations, internal map, pose (and plan?)
-
-        Input:
-            obs: home_robot Observation type
-
-        Output:
-            image: cv2 Image combining all the above visuals
-        """
-        raise NotImplementedError
 
 class DiscreteRecovery:
     def __init__(self, turning_action):

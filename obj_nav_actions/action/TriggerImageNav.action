@@ -1,0 +1,13 @@
+# Trigger a new image navigation task and wait till completion.
+
+# Image subgoal issued to controller
+sensor_msgs/Image subgoal
+---
+# Results of the task.
+bool done               # True if controller ended the task itself
+bool success            # True if the goal was reached
+string status           # result status message
+float32 remaining_dist  # final remaining distance to goal
+---
+# Feedback on remaining (temporal) distance to goal
+float32 remaining_dist

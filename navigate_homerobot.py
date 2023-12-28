@@ -20,7 +20,7 @@ from utils.fmm_planner import FMMPlanner
 from utils.habitat_utils import ObjNavEnv, setup_env_config
 
 import habitat
-from controller import *
+from fmm_controller import *
 
 import random
 import time

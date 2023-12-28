@@ -15,7 +15,7 @@ import math
 from utils.habitat_utils import ObjNavEnv, setup_env_config
 
 import habitat
-from controller import *
+from fmm_controller import *
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
