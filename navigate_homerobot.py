@@ -40,6 +40,8 @@ class NavigatorHomeRobot(Navigator):
             llm_config_path=llm_config_path
         )
 
+        self.GT = True
+
         # Setup home robot sim environment
         config = setup_env_config(default_config_path='configs/objectnav_hm3d_v2_with_semantic.yaml')
         self.config = config
@@ -49,7 +51,9 @@ class NavigatorHomeRobot(Navigator):
         env_semantic_names = ['sofa' if x == 'couch' else x for x in env_semantic_names]
         env_semantic_names = ['toilet' if x == 'toilet seat' else x for x in env_semantic_names]
         self.semantic_annotations = env_semantic_names
-
+        self.goal = self.env.env.current_episode.object_category
+        if self.goal == "tv_monitor":
+            self.goal = "tv"
         # Set up controller
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         self.controller = FMMController(self.device, env_config=self.config)
@@ -71,7 +75,8 @@ class NavigatorHomeRobot(Navigator):
         env_semantic_names = ['toilet' if x == 'toilet seat' else x for x in env_semantic_names]
         self.semantic_annotations = env_semantic_names
         self.goal = self.env.env.current_episode.object_category
-
+        if self.goal == "tv_monitor":
+            self.goal = "tv"
         # Reset controller
         self.controller = FMMController(self.device, env_config=self.config)
 
@@ -105,10 +110,12 @@ class NavigatorHomeRobot(Navigator):
         self.action_logging.write(f'[EPISODE ID]: {self.env.env.current_episode.episode_id}\n')
         self.action_logging.write(f'[SCENE ID]: {self.env.env.current_episode.scene_id}\n')
         self.action_logging.write(f'[GOAL]: {self.goal}\n')
+        self.action_logging.close()
 
         cv2.namedWindow("View")
 
-        while (self.action_step < self.max_episode_step) and (not self.success_flag):
+        while (self.action_step < self.max_episode_step) and (not self.success_flag) and (self.llm_loop_iter <= 30):
+            self.action_logging = open(self.action_log_path, 'a')
             obs = self._observe()
             self.controller.update(obs)
             images = self.controller.visualise(obs)
@@ -120,7 +127,7 @@ class NavigatorHomeRobot(Navigator):
             subgoal_position = None
             if not self.controller_active:
                 subgoal_position, cam_uuid = self.loop(obs)
-
+                print('Set Subgoals:',subgoal_position)
                 if subgoal_position is not None:
                     self.controller.set_subgoal_image(
                         subgoal_position,
@@ -139,6 +146,7 @@ class NavigatorHomeRobot(Navigator):
 
             if self.controller_active:
                 action, success = self.controller.step()
+                print('Control', action, success)
                 if action is None:
                     self.controller_active = False
                     if self.last_subgoal == self.goal:
@@ -156,15 +164,29 @@ class NavigatorHomeRobot(Navigator):
                         self.action_logging.write(f"[END]: FAIL\n")
 
                 # TODO: Does any feedback need to be given to perception-reasoning?
-            
+            self.action_logging.close()
             print('Pos:', self.env.env.sim.agents[0].get_state().position)
+            
+        # Record ending position
+        self.action_logging = open(self.action_log_path, 'a')
+        img_lang_obs = self.perceive(obs)
+        if self.visualisation:
+            self.visualise_objects(obs, img_lang_obs)            
+    
+        i = 0
+        while not self.env.env.episode_over:
+            print(i)
+            self.env.act('stop')
 
+        print(nav.env.get_episode_metrics())
+        self.action_logging.write(f"[Metrics]: {nav.env.get_episode_metrics()}\n")
+        self.action_logging.close()
         cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     nav = NavigatorHomeRobot()
     nav.reset()
-    test_episode = 2
+    test_episode = 3
     test_history = []
     while True:
         while nav.env.env.current_episode.episode_id not in [str(i) for i in range(test_episode)] or ((nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id ) in test_history):

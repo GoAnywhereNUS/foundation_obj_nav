@@ -11,7 +11,7 @@ import torch
 
 from scene_graph import SceneGraph, default_scene_graph_specs
 from model_interfaces import GPTInterface, VLM_BLIP, VLM_GroundingDino
-import json, os
+import json, random
 
 import time
 
@@ -59,10 +59,13 @@ class Navigator:
         self.visualisation = True
         self.is_navigating = False
         self.success_flag = False
+        self.GT = False
+        self.semantic_annotations = None
 
         self.trial_folder = self.create_log_folder()
+        self.action_log_path = os.path.join(self.trial_folder, 'action.txt')
         self.action_logging = open(
-            os.path.join(self.trial_folder, 'action.txt'), 'a'
+            self.action_log_path, 'a'
         )
         self.llm.reset(self.trial_folder)
 
@@ -90,10 +93,10 @@ class Navigator:
 
         # Reset logging
         self.trial_folder = self.create_log_folder()
+        self.action_log_path = os.path.join(self.trial_folder, 'action.txt')
         self.action_logging = open(
-            os.path.join(self.trial_folder, 'action.txt'), 'a'
+            self.action_log_path, 'a'
         )
-
         # Reset LLM
         self.llm.reset(self.trial_folder)
 
@@ -185,13 +188,37 @@ class Navigator:
                 location.replace(" ", "") #clean space between "living room"
             )
 
-            if (
-                self.query_vqa(image, "Is there a door in the photo?") == 'yes' 
-                and len(self.defined_entrance) > 0
-            ):
-                objects = self.query_objects(image,  self.defined_entrance)
+            if self.GT: # Load Ground Truth Object Detection
+                bbox_lst = []
+                objlabel_lst = []
+                cropped_img_lst = []
+                semantic_gt = images[label +'_semantic']
+                for instance in np.unique(semantic_gt):
+                    instance_label = self.semantic_annotations[instance]
+                    if instance_label not in ['wall', 'ceiling', 'floor', 'unknown', 'door']:
+                        instance_index = np.argwhere(semantic_gt == instance)
+                        min_y = np.min(instance_index[:,0])
+                        max_y = np.max(instance_index[:,0])
+                        min_x = np.min(instance_index[:,1])
+                        max_x = np.max(instance_index[:,1])
+                        if (max_x - min_x) * (max_y - min_y) < 50:
+                            continue
+                        elif (max_x - min_x) * (max_y - min_y) < 200 and self.goal not in instance_label:
+                            continue
+                        elif (max_x - min_x) * (max_y - min_y) < 1000 and random.uniform(0,1) > 0.2 and self.goal not in instance_label:
+                            continue
+                        objlabel_lst.append(instance_label)
+                        bbox_lst.append([min_x, min_y, max_x, max_y])
+                        cropped_img_lst.append(image.crop(np.array([min_x,min_y,max_x,max_y])))
+                objects = (torch.tensor(bbox_lst), objlabel_lst, cropped_img_lst)
+            
             else:
-                objects = self.query_objects(image)
+                if (self.query_vqa(image, "Is there a door in the photo?") == 'yes'
+                    and len(self.defined_entrance) > 0
+                ):
+                    objects = self.query_objects(image,  self.defined_entrance)
+                else:
+                    objects = self.query_objects(image)
             image_objects[label] = objects
 
         # TODO: Implement some reasonable fusion across all images
@@ -226,12 +253,23 @@ class Navigator:
             whole_query = start_question + discript + end_question
         elif query_type == 'local':
             start_question = "There is a list:"
-            end_question = f"Please select one object that is most likely located near a {goal}. Please only select one object in the list and use one word in answer. Always follow the format: Answer: <your answer>."
+            end_question = f"Please select one object that is most likely located near a {goal}. Please only select one object in the list and use this element name in answer. Use the exact name in the list. Always follow the format: Answer: <your answer>."
             whole_query = start_question + discript + end_question
         elif query_type == 'state_estimation':
             discript1 = "Depiction1: On the left, there is " + ", ".join(discript[0]['left']) + ". On the right, there is " + ", ".join(discript[0]['right']) + ". In front of me, there is " + ", ".join(discript[0]['forward']) + ". Behind me, there is " + ", ".join(discript[0]['rear']) + '\n'
             discript2 = "Depiction2: On the left, there is " + ", ".join(discript[1]['left']) + ". On the right, there is " + ", ".join(discript[1]['right']) + ".In front of me, there is " + ", ".join(discript[1]['forward']) + ". Behind me, there is " + ", ".join(discript[1]['rear']) + '\n'
             question = "These are depictions of what I observe from two different vantage points. Please tell me if these two viewpoints correspond to the same room. It's important to note that the descriptions may originate from two positions within the room, each with a distinct angle. Therefore, the descriptions may pertain to the same room but not necessarily capture the same elements. Please be aware that my viewing angle varies, so it is not necessary for the elements to align in the same direction. As long as the relative positions between objects are accurate, it is considered acceptable. Please assess the arrangement of objects and identifiable features in the descriptions to determine whether these two positions are indeed in the same place. Provide a response of True or False, along with supporting reasons."
+            whole_query = discript1 + discript2 + question
+        elif query_type == 'node_feature':
+            target_node = discript[0].split("_")[0]
+            target_feature = discript[1]
+            candidate_entrances = discript[2]
+            candidate_entrances_feature = discript[3]
+            discript1 = f"We want to find a {target_node} that is near" + ", ".join(target_feature)
+            discript2 = "Now we have seen the following object: "
+            for i, name in enumerate(candidate_entrances):
+                discript2 += f" {name} that is near " + ", ".join(candidate_entrances_feature[i]) +". "
+            question = "Please select one object that is most likely to be the object I want to find. Please only select one object and use this element name in answer. Use the exact name in the given sentences. Always follow the format: Answer: <your answer>."
             whole_query = discript1 + discript2 + question
         return whole_query
 
@@ -270,7 +308,7 @@ class Navigator:
             for i in indices:
                 similar_room = room_lst_scene_graph[i]
                 similar_room_description = self.scene_graph.get_node_attr(similar_room)['description']
-                similar_room_obj = self.scene_graph.get_obj_in_room(similar_room)
+                similar_room_obj = self.scene_graph.get_related_codes(similar_room, 'contains')
                 similar_room_obj_descript = self.query_detailed_descript(similar_room_obj)
 
                 store_ans = []
@@ -332,11 +370,16 @@ class Navigator:
                 object_lst = seperate_ans[object_idx+1:]
 
                 format_test = entrance_lst + object_lst
+                qualified_node = []
                 for item in format_test:
                     if '_' in item:
                         obj_name = item.split('_')[0]
                         idx = int(item.split('_')[1])
-                break
+                        qualified_node.append(item)
+                if len(qualified_node) > 0:
+                    break
+                else:
+                    attempts += 1
             except:
                 attempts += 1
         # Estimate State
@@ -344,6 +387,7 @@ class Navigator:
         cropped_img_lst = []
         cleand_sensor_dir = []
         cleaned_object_lst = []
+        to_be_updated_nodes = []
         for obj in object_lst:
             try:
                 bb_idx = int(obj.split('_')[1])
@@ -361,18 +405,27 @@ class Navigator:
         est_state, room_description = self.estimate_state(obs)
         print('Room Description', room_description) 
         # Update Room Node
+        print("State Estimation:", est_state)
         if est_state != None:
             self.current_state = est_state
             print(f'Existing node: {self.current_state}')
+            to_be_updated_nodes = self.scene_graph.update_node(self.current_state)
+            self.explored_node.append(self.last_subgoal) #TODO: check when we add this
+            # TODO: how we update explored node
+
         else:
-            self.current_state = self.scene_graph.add_node("room", obs_location, {"image": np.random.rand(4, 4), "description": room_description})
+            new_node = self.scene_graph.add_node("room", obs_location, {"active": True, "image": np.random.rand(4, 4), "description": room_description})
+            if self.last_subgoal != None and self.scene_graph.is_type(self.last_subgoal, 'object'):
+                self.scene_graph.add_edge(self.current_state, new_node, "connects to")
+            
+            self.current_state = new_node
+            
             if self.last_subgoal != None:
                 if self.scene_graph.is_type(self.last_subgoal, 'entrance'):
+                    find_last_entrance = False
                     self.scene_graph.add_edge(self.current_state, self.last_subgoal, "connects to")
                     self.explored_node.append(self.last_subgoal)
                     for idx, item in enumerate(entrance_lst):
-                        if item == 'none':
-                            continue
                         if '_' in item:
                             entrance_name = item.split('_')[0]
                             bb_idx = int(item.split('_')[1])
@@ -380,12 +433,22 @@ class Navigator:
                             #TODO: how to choose the last entrance image
                             if sensor_dir == 'rear':
                                 entrance_lst[idx] =  'LAST' + entrance_lst[idx]
+                                find_last_entrance = True
+                                break
+                    # TODO: How to select the door just passed by
+                    if not find_last_entrance:
+                        for i, entrance in enumerate(entrance_lst):
+                            if '_' in entrance_lst[i] and random.uniform(0,1) > 0.5:
+                                entrance_lst[i] = 'LAST' + entrance_lst[i]
+                                find_last_entrance = True 
                                 break
                 elif self.scene_graph.is_type(self.last_subgoal, 'room'):
                     self.scene_graph.add_edge(self.current_state, self.last_subgoal, "connects to")
                     self.explored_node.append(self.last_subgoal)
             print(f'Add new node: {self.current_state}')
-
+        
+        self.action_logging.write(f'[State]: {self.current_state}\n')
+        
         room_lst_scene_graph = self.scene_graph.get_secific_type_nodes('room')
         all_room = [room[:room.index('_')] for room in room_lst_scene_graph]
         
@@ -401,7 +464,7 @@ class Navigator:
                         continue
                     bb_idx = int(item.split('_')[1])
                     sensor_dir = idx_sensordirection[bb_idx]
-                    temp_obj = self.scene_graph.add_node("object", obj_name, {"image": cropped_imgs[bb_idx],"bbox": obj_bbox[bb_idx], "cam_uuid": sensor_dir})
+                    temp_obj = self.scene_graph.add_node("object", obj_name, {"active": True, "image": cropped_imgs[bb_idx],"bbox": obj_bbox[bb_idx], "cam_uuid": sensor_dir})
                     self.scene_graph.add_edge(self.current_state, temp_obj, "contains")
                     bbox_idx_to_obj_name[bb_idx] = temp_obj
             except:
@@ -423,8 +486,9 @@ class Navigator:
                         self.scene_graph.nodes()[temp_entrance]['image'] = cropped_imgs[bb_idx]
                         self.scene_graph.nodes()[temp_entrance]['bbox'] = obj_bbox[bb_idx]
                         self.scene_graph.nodes()[temp_entrance]['cam_uuid'] = sensor_dir
+                        self.scene_graph.nodes()[temp_entrance]['active'] = True
                     else:
-                        temp_entrance = self.scene_graph.add_node("entrance", entrance_name, {"image": cropped_imgs[bb_idx],"bbox": obj_bbox[bb_idx],"cam_uuid": sensor_dir})
+                        temp_entrance = self.scene_graph.add_node("entrance", entrance_name, {"active": True,"image": cropped_imgs[bb_idx],"bbox": obj_bbox[bb_idx],"cam_uuid": sensor_dir})
                     self.scene_graph.add_edge(self.current_state, temp_entrance, "connects to")
                     bbox_in_specific_dir = np.where(np.array(idx_sensordirection) == sensor_dir)[0] # get all objects in the direction
                     nearby_bbox_idx = self.get_nearby_bbox(obj_bbox[bb_idx],obj_bbox[bbox_in_specific_dir,])
@@ -434,6 +498,31 @@ class Navigator:
                             self.scene_graph.add_edge(temp_entrance, new_obj, "is near")
                 except:
                     print('ERROR')
+
+        # TODO: Add how to recoganize nodes:
+        if len(to_be_updated_nodes) > 0:
+            current_entrance = self.scene_graph.get_related_codes(self.current_state,'connects to')
+            if len(current_entrance) > 0:
+                print(' *** UPDATING ENTEANCE ***')
+                current_entrance_feature = [self.scene_graph.get_related_codes(node,'is near') for node in current_entrance]
+                for target_node in to_be_updated_nodes:
+                    target_features = self.scene_graph.get_related_codes(target_node,'is near')
+        
+                    whole_query = self.generate_query([target_node, target_features, current_entrance, current_entrance_feature], None, 'node_feature')
+                    
+                    store_ans = []
+                    for i in range(self.llm_max_query):
+                        seperate_ans = self.llm.query_node_feature(whole_query)
+                        if len(seperate_ans) > 0 and seperate_ans[0] in current_entrance:
+                            store_ans.append(seperate_ans[0])
+                        if len(store_ans)  >= self.llm_sampling_query:
+                            break
+                    goal_node_name = most_common(store_ans)
+                    if goal_node_name in current_entrance: # If we find a current door is similar to the important doors. Otherwise, we ignore it.
+                        self.explored_node.append(goal_node_name)
+                        self.scene_graph.combine_node(target_node, goal_node_name)
+                    # import pdb
+                    # pdb.set_trace()
         return est_state
 
 
@@ -457,7 +546,7 @@ class Navigator:
                 self.path = [obj]
                 return self.path
 
-        Scene_Discript = self.scene_graph.print_sub_scene_graph(selected_node = self.current_state, pretty=False)
+        Scene_Discript = self.scene_graph.print_scene_graph(selected_node = self.current_state, pretty=False, skip_object=True)
         whole_query = self.generate_query(Scene_Discript, goal, 'plan')
 
         for i in range(self.llm_max_query):
@@ -473,42 +562,59 @@ class Navigator:
         store_ans_copy = store_ans.copy()
         goal_node_name = most_common(store_ans)
 
+        if goal_node_name == None:
+            goal_node_name = self.current_state
+        # TODO: raise exception on how to deal with none output.
+
         print(f'[PLAN INFO] current state:{self.current_state}, goal state:{goal_node_name}')
 
         ########### End Query LLM for Plan #################
 
-        path = self.scene_graph.plan_shortest_paths(self.current_state, goal_node_name)
+        try:
+            if self.scene_graph.has_path(self.current_state, goal_node_name):
+                path = self.scene_graph.plan_shortest_paths(self.current_state, goal_node_name)
+            else:
+                path = [self.current_state]
+        except:
+            path = [self.current_state]
+            self.action_logging.write(f'[ERROR] Cannot Find a path between {self.current_state} and {goal_node_name}')
 
         # If we are already in the target room, Start local exploration in the room
         if path[-1] == self.current_state:
             self.explored_node.append(self.current_state)
-            obj_lst = self.scene_graph.get_obj_in_room(self.current_state)
+            obj_lst = self.scene_graph.get_related_codes(self.current_state, 'contains')
             sg_obj_Discript = "["+ ", ".join(obj_lst) + "]"
             whole_query = self.generate_query(sg_obj_Discript, goal, 'local')
             
             store_ans = []
+            nodes_in_view = self.scene_graph.nodes(active_flag=True)
+
             for i in range(self.llm_max_query):
                 seperate_ans = self.llm.query_local_explore(whole_query)
+                print(seperate_ans)
                 if len(seperate_ans) > 0:
-                    if seperate_ans[0] in self.scene_graph.nodes():
+                    if seperate_ans[0] in nodes_in_view:
                         store_ans.append(seperate_ans[0])
-                    elif seperate_ans[-1] in self.scene_graph.nodes():
+                    elif seperate_ans[-1] in nodes_in_view:
                          store_ans.append(seperate_ans[-1])
                 if len(store_ans)  >= self.llm_sampling_query:
                     break
             
             goal_node_name = most_common(store_ans)
+            if goal_node_name == None:
+                goal_node_name = random.choice(obj_lst)
+            
             path = [goal_node_name]
         
         # if next subgoal is entrance, we mark it.
         if len(path) > 1:
-            print('path', path)
-            if self.scene_graph.is_type(path[1], 'entrance'):
-                self.last_subgoal = path[1]
+            self.last_subgoal = path[1]
         else:
             self.last_subgoal = path[0]
         self.path = path
-            
+        
+        if self.scene_graph.is_type(self.last_subgoal, 'room'):
+            self.last_subgoal = random.choice(self.scene_graph.get_related_codes(self.last_subgoal, 'contains'))
         print(f'[PLAN INFO] Path:{self.path}')
 
         return path
@@ -566,6 +672,13 @@ class Navigator:
             if len(os.listdir(trial_folder)) == 0:
                 # Folder has no data, so we can go ahead and use it
                 return trial_folder
+            elif len(os.listdir(trial_folder)) == 1:
+                action_file_path = os.path.join(trial_folder, os.listdir(trial_folder)[0])
+                if os.path.getsize(action_file_path) == 0:
+                # Folder has an empty file (action.txt), so we still use it.
+                    return trial_folder
+                else:
+                    trial = max_number + 1
             else:
                 # Folder exists but contains data, so create a new one
                 # with the next available numerical ID
@@ -636,6 +749,12 @@ class Navigator:
             plt.savefig(self.trial_folder + '/'  + time.strftime("%Y%m%d%H%M%S") + "_chosen_depth_" + str(cam_uuid[:-6]) + ".png")
             plt.clf()
 
+
+        if len(path) > 1:
+            next_goal = path[1]
+        else:
+            next_goal = path[0]
+    
         if len(path) > 1:
             next_goal = path[1]
         else:

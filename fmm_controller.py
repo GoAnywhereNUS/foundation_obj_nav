@@ -136,7 +136,7 @@ class FMMController(Controller):
         self.select_subgoal_downsample_depth = 1 # int
         self.select_subgoal_outlier_threshold = 0.9 # specifies quantile in range [0, 1]
         self.perform_recovery = True
-        self.max_num_wandering_steps = None
+        self.max_num_wandering_steps = 80
 
         self.obs_dilation_selem_radius = 2
         self.obs_dilation_selem = skimage.morphology.disk(
@@ -531,8 +531,8 @@ class FMMController(Controller):
             self.curr_tracking_goal_global[:2] - torch.tensor([px, py], device=self.device)
         ).cpu().item()
         stop = tracking_goal_dist < self.curr_goal_tolerance
-        if tracking_goal_dist < self.min_tracking_goal_dist_step:
-            self.min_tracking_goal_dist = 0
+        if tracking_goal_dist < self.min_tracking_goal_dist:
+            self.min_tracking_goal_dist = tracking_goal_dist
             self.min_tracking_goal_dist_step = self.num_steps
 
         if stop:
@@ -557,6 +557,18 @@ class FMMController(Controller):
 
         if self.max_num_wandering_steps is not None:
             if self.num_steps - self.min_tracking_goal_dist_step > self.max_num_wandering_steps:
+                print(
+                    "Ended task at step", 
+                    self.num_steps, 
+                    "after wandering! Min dist:", 
+                    self.min_tracking_goal_dist, 
+                    ",", 
+                    self.min_tracking_goal_dist_step
+                )
+
+                # Reset
+                self.reset()
+                
                 return None, False
 
         ego_stg_x, ego_stg_y = [
@@ -581,7 +593,7 @@ class FMMController(Controller):
             ).cpu().item()
         init_goal_dist = None
 
-        print(">>> Dist to init: ", init_goal_dist, "   Dist to tracking: ", tracking_goal_dist)
+        print("[", self.num_steps, "] Dist to init: ", init_goal_dist, "   Dist to tracking: ", tracking_goal_dist)
 
         # Update robot state tracking
         self.prev_action = action

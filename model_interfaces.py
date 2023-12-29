@@ -122,9 +122,8 @@ USER_EXAMPLE_4 = """You see the partial layout of the apartment:
 {"room": {"livingroom_1": {"connects to": []}}}
 Question: Your goal is to find a sink. If any of the rooms in the layout are likely to contain the target object, specify the most probable room name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found."""
 
-AGENT_EXAMPLE_4 = """Reasoning: There is only livingroom in the layout. livingroom is not likely to contain sink, but there is no entrance/door/doorway in the layout. Therefore, there is nothing to explore, I have to reply.
-Answer: None"""
-
+AGENT_EXAMPLE_4 = """Reasoning: There is only livingroom in the layout. livingroom is not likely to contain sink, but there is no entrance/door/doorway in the layout. Therefore, there is no entrance to explore, I have to reply the current room name.
+Answer: livingroom_1"""
 
 ##############################
 
@@ -170,7 +169,7 @@ Description2:  On the left, there is a white glass mirror, silver metal faucet, 
 These are depictions of what I observe from two different vantage points. Please assess the shared objects and spatial relationship in the descriptions to determine whether these two positions are indeed in the same place. Provide a response of True or False, along with supporting reasons. In each direction, focus on only two to three large objects for reasoning.
 """
 
-STATE_ESTP_AGENT_EXAMPLE_2 = """Reasoning: To simplify the description, given the abundance of objects, we focus initially on common perceptions of larger objects, as they are less prone to detection errors.
+STATE_EST_AGENT_EXAMPLE_2 = """Reasoning: To simplify the description, given the abundance of objects, we focus initially on common perceptions of larger objects, as they are less prone to detection errors.
 Description 1: On the left, there is brown wood cabinet, silver metal faucet, white wood bathroom sink, and white wood bed. On the right, there is nothing. In front of me, there is a silver metal faucet, silver glass mirror,white porcelain sink, brown wood cabinet, black mental wall lamp.  Behind me, there is an orange glass lamp, white porcelain tub, white cotton bed. 
 Description 2: On the left, there is white porcelain sink and white wood bed. On the right, there are nothing. In front of me, there is a silver mental faucet and white plastic toiletry. Behind me, I can see white porcelain tub, black cloth curtain, white cotton bed.
 Shared Large Objects: Both descriptions mention silver metal faucets, white beds, and sink, contributing to a consistent thematic presence. Spatial Relationship: The placement of key items like silver metal faucets and brown wood cabinets described in similar configurations create a sense of coherence. Potential for Small Errors: Description 2 lacks specified items, such as accessory, door and countertop. Besides, there are small errors in the material of bed. Errors in material or color, as well as the potential omission of small-size objects, can indeed be attributed to variations in observation. Despite this, the two descriptions are depicting the same room, with the potential for small errors accounting for minor variations.
@@ -181,13 +180,36 @@ Description2: On the left, there is a white glass mirror, silver metal faucet, w
 These are depictions of what I observe from two different vantage points. Please assess the shared objects and spatial relationship in the descriptions to determine whether these two positions are indeed in the same place. Provide a response of True or False, along with supporting reasons. In each direction, focus on only two to three large objects for reasoning.
 """
 
-STATE_ESTP_AGENT_EXAMPLE_3 = """Reasoning: To simplify the description, given the abundance of objects, we focus initially on common perceptions of larger objects, as they are less prone to detection errors.
+STATE_EST_AGENT_EXAMPLE_3 = """Reasoning: To simplify the description, given the abundance of objects, we focus initially on common perceptions of larger objects, as they are less prone to detection errors.
 Description1: On the left, there is a white wood dresser, and a white glass window/door. On the right, there is a white wood chair and a silver metal wall lamp. In front of me, there is nothing. Behind me, there is a purple wood bed, yellow wood ceiling fan, white wood dresser.
 Description2: On the left, there is a silver metal faucet, white porcelain sink, white wood sink, white wood bed. On the right, there is nothing. In front of me, there is a silver metal faucet, white porcelain sink, white plastic toiletry. Behind me, there is a white porcelain tub, black cloth curtain, white cotton bed, white porcelain bath.
 Shared Large Objects: Both descriptions feature common large objects, including a wood bed and a silver metal wall lamp, though the color of bed is different. Spatial Relationships: Despite variations in surrounding details, the consistent mention of a white wood bed suggests a shared spatial context, possibly from different viewpoints within the same room. Minor differences, such as color variations in the bed, may be attributed to observational nuances rather than indicating distinct rooms, reinforcing the likelihood of the same room.
 Answer: True"""
 #######################
 
+NODE_FEAT_USER_EXAMPLE_1 = """We want to find a doorframe that is near a tv, a chair and a stool.
+Now we have seen the following object: doorframe_2 that is near chair and sofa. doorframe_3 that is near a tv and a chair. wooden door_2 that is near table, sink and lamp.
+Please select one object that is most likely to be the object I want to find. Please only select one object in the list and use this element name in answer. Use the exact name in the given sentences. Always follow the format: Answer: <your answer>."
+"""
+
+NODE_FEAT_AGENT_EXAMPLE_1 = """Reasoning: Among the given objects, "doorframe_3" is mentioned to be near a TV and a chair, most likely meeting the specified criteria of being near a TV, chair, and stool.
+Answer: doorframe_3"""
+
+NODE_FEAT_USER_EXAMPLE_2 = """We want to find a door that is near a dining table, window glass and a table cloth.
+Now we have seen the following object: door_2 that is near table and window glass. doorframe_4 that is near a table cloth and a glass. door_4 that is near photo, sofa and windows.
+Please select one object that is most likely to be the object I want to find. Please only select one object in the list and use this element name in answer. Use the exact name in the given sentences. Always follow the format: Answer: <your answer>."
+"""
+
+NODE_FEAT_AGENT_EXAMPLE_2 = """Reasoning: Among the given objects, 'door_2' is mentioned to be near a table and window glass. Although 'doorframe_4' is also near a tablecloth and a glass, it seems to meet the criteria. However, since the target goal is a door and not a doorframe, 'door_2' is more suitable.
+Answer: door_2"""
+
+NODE_FEAT_USER_EXAMPLE_3 = """We want to find a door that is near nothing.
+Now we have seen the following object: door_1 that is near toy and doorframe. doorframe_3 that is near nothing. door_5 that is near windor, cabinet, and bed.
+Please select one object that is most likely to be the object I want to find. Please only select one object in the list and use this element name in answer. Use the exact name in the given sentences. Always follow the format: Answer: <your answer>."
+"""
+
+NODE_FEAT_AGENT_EXAMPLE_3 = """Reasoning: Among the given objects, 'doorframe_3' is mentioned to be near nothing. The door we want to find is also near nothing, it seems to meet the criteria. However, since the target goal is a door and not a doorframe, 'doorframe_3' is more suitable.
+Answer: doorframe_3"""
 
 class GPTInterface(LLMInterface):
     def __init__(
@@ -332,7 +354,7 @@ class GPTInterface(LLMInterface):
         
         complete_response = response.choices[0].message.content.lower()
         complete_response = complete_response.replace(" ", "")
-        seperate_ans = re.split('\n|,|:', complete_response)
+        seperate_ans = re.split('\n|,|:|-', complete_response)
         seperate_ans = [i.replace('.','') for i in seperate_ans if i != ''] 
         
         return seperate_ans
@@ -343,9 +365,9 @@ class GPTInterface(LLMInterface):
             {"role": "user", "content": STATE_EST_USER_EXAMPLE_1},
             {"role": "assistant", "content": STATE_EST_USER_EXAMPLE_1},
             {"role": "user", "content": STATE_EST_USER_EXAMPLE_2},
-            {"role": "assistant", "content": STATE_ESTP_AGENT_EXAMPLE_2},
+            {"role": "assistant", "content": STATE_EST_AGENT_EXAMPLE_2},
             {"role": "user", "content": STATE_EST_USER_EXAMPLE_3},
-            {"role": "assistant", "content": STATE_ESTP_AGENT_EXAMPLE_3},
+            {"role": "assistant", "content": STATE_EST_AGENT_EXAMPLE_3},
             {"role": "user", "content": string}
         ]
         # print('CLASSIFY MESSGAE', string)
@@ -369,6 +391,35 @@ class GPTInterface(LLMInterface):
         else:
             cleaned_ans = 'none'
         return cleaned_ans
+
+    def query_node_feature(self, string):
+            chat_query = [
+                {"role": "system", "content": self.config["setup_message"]},
+                {"role": "user", "content": NODE_FEAT_USER_EXAMPLE_1},
+                {"role": "assistant", "content": NODE_FEAT_AGENT_EXAMPLE_1},
+                {"role": "user", "content": NODE_FEAT_USER_EXAMPLE_2},
+                {"role": "assistant", "content": NODE_FEAT_AGENT_EXAMPLE_2},
+                {"role": "user", "content": NODE_FEAT_USER_EXAMPLE_3},
+                {"role": "assistant", "content": NODE_FEAT_AGENT_EXAMPLE_3},
+                {"role": "user", "content": string}
+            ]
+            # print('CLASSIFY MESSGAE', string)
+            response = self.client.chat.completions.create(
+                model=self.config["model_type"],
+                messages=chat_query,
+                seed=self.config["seed"]
+            )
+            with open(self.log_path, 'a') as file:
+                file.write(f'[NODE FEAT QUERY MESSAGE]: {chat_query}\n')
+                log_reply =  response.choices[0].message.content.replace("\n", ";")
+                file.write(f'[NODE FEAT REPLY MESSAGE]: {log_reply}\n')
+        
+            complete_response = response.choices[0].message.content.lower()
+            sample_response = complete_response[complete_response.find('answer:'):]
+            seperate_ans = re.split('\n|; |, | |answer:', sample_response)
+            seperate_ans = [i.replace('.','') for i in seperate_ans if i != '']
+            return seperate_ans
+
 
 class VLM_BLIP(VQAPerception):
     def __init__(self):
