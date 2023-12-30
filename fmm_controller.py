@@ -111,6 +111,9 @@ class FMMController(Controller):
         env_config=None,
         controller_config=None,
         mapper_config=None,
+        semantic_categories=None,
+        semantic_annotations=None,
+        traversable_categories=None,
     ):
         super().__init__(device)
 
@@ -119,7 +122,18 @@ class FMMController(Controller):
         else:
             self.turn_angle = 30    # degrees
 
-        self.mapper = Mapper(device)
+        self.using_semantics = semantic_categories is not None
+        if self.using_semantics:
+            assert semantic_annotations is not None
+        self.semantic_categories = semantic_categories
+        self.semantic_annotations = semantic_annotations
+        self.mapper = Mapper(
+            device,
+            semantic_categories=semantic_categories,
+            semantic_annotations=semantic_annotations,
+            traversable_categories=traversable_categories,
+        )
+
         self.planner = None
         self.discrete_actions = True
         self.agent_cell_radius = 4
@@ -411,7 +425,8 @@ class FMMController(Controller):
             return None, False
 
         self.num_steps += 1
-        obstacle_map = self.mapper.map_state.get_obstacle_map(0)
+        # obstacle_map = self.mapper.map_state.get_obstacle_map(0)
+        obstacle_map = self.mapper.get_obstacle_map()
         
         # Get current pose and long-term goal
         px, py, po, ly1, _, lx1, _ = self.mapper.map_state.get_planner_pose_inputs(0)
@@ -695,19 +710,21 @@ class FMMController(Controller):
 
 if __name__ == "__main__":
     device = torch.device('cuda:0')
-    controller = FMMController(device)
 
-    # config = setup_env_config()
     config = setup_env_config(default_config_path='configs/objectnav_hm3d_v2_with_semantic.yaml')
     env = ObjNavEnv(habitat.Env(config=config), config)
     obs = env.reset()
 
-    # import habitat_sim
-    # pos = [2.5770767, -0.34942314, 0.0]
-    # ori = habitat_sim.utils.common.quat_from_angle_axis(np.pi, np.array([0, 0, 1]))
-    # env.set_agent_position(pos, ori)
-    # print("Set agent position")
-    # print(env.env.sim.get_agent_state().position)
+    env_semantic_names = [s.category.name().lower() for s in env.env.sim.semantic_annotations().objects]
+    stairs_instances = [i for i, name in enumerate(env_semantic_names) if name == "stairs"]
+    print("Stairs instances:", stairs_instances)
+
+    controller = FMMController(
+        device, 
+        semantic_categories=["others", "stairs"],
+        semantic_annotations=env_semantic_names,
+        traversable_categories=["stairs"],
+    )
 
     import cv2
     import time
@@ -725,6 +742,12 @@ if __name__ == "__main__":
 
         # Visualise
         images = controller.visualise(obs)
+        semantic_frame = obs['forward_semantic'][:, :, 0]
+        semantic_frame = np.isin(semantic_frame, stairs_instances)
+        semantic_frame = (semantic_frame * 255).astype(np.uint8)
+        semantic_frame = np.repeat(semantic_frame[:, :, np.newaxis], 3, axis=2)
+        images[50:530, 670:1310] = cv2.resize(semantic_frame, (640, 480))
+
         cv2.imshow("Images", images)
         key = cv2.waitKey(50)
 
@@ -745,7 +768,6 @@ if __name__ == "__main__":
             controller.set_subgoal_coord([0.5, 0], obs)
         elif key == ord('o'):
             controller.set_subgoal_image(
-                # [260, 380, 120, 360],
                 [260, 120, 380, 360],
                 "forward_depth",
                 obs,

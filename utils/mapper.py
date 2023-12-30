@@ -8,36 +8,102 @@ import home_robot.utils.pose as pu
 import home_robot.utils.visualization as vu
 from home_robot.mapping.geometric.geometric_map_module import GeometricMapModule
 from home_robot.mapping.geometric.geometric_map_state import GeometricMapState
+from home_robot.mapping.semantic.categorical_2d_semantic_map_module import(
+    Categorical2DSemanticMapModule,
+)
+from home_robot.mapping.semantic.categorical_2d_semantic_map_state import (
+    Categorical2DSemanticMapState,
+)
+from home_robot.mapping.semantic.constants import MapConstants as MC
 
 
 class Mapper:
-    def __init__(self, device):
+    def __init__(
+        self, 
+        device, 
+        semantic_categories=None,
+        semantic_annotations=None,
+        traversable_categories=None,
+    ):
         self.device = device
-        self.map_state = GeometricMapState(
-            device=device,
-            num_environments=1,
-            map_resolution=5,
-            map_size_cm=4800,
-            global_downscaling=2,
+        self.semantic = semantic_categories is not None
+        self.semantic_categories = semantic_categories
+        if self.semantic:
+            assert semantic_annotations is not None
+        self.semantic_annotations = semantic_annotations
+        self.traversable_categories = (
+            None
+            if isinstance(traversable_categories, list) and len(traversable_categories) == 0
+            else traversable_categories
         )
-        self._mapper = GeometricMapModule(
-            frame_height=480,           # pix
-            frame_width=640,            # pix
-            camera_height=0.88,         # m
-            hfov=90,                    # deg
-            map_size_cm=4800,           # cm
-            map_resolution=5,           # cm
-            vision_range=100,           # no. of map cells
-            explored_radius=150,        # cm
-            been_close_to_radius=200,   # cm
-            global_downscaling=2,
-            du_scale=4,
-            exp_pred_threshold=1.0,
-            map_pred_threshold=1.0,
-            min_obs_height_cm=50,
-            min_depth=0.5,              # m
-            max_depth=5.0,              # m
-        )
+
+        # Assume that semantic categories will always start
+        # with a catch-all, i.e. ["others", ...]
+        if self.semantic:
+            one_hot_encoding = torch.eye(len(semantic_categories))
+            self.instance_to_one_hot = torch.stack([
+                (
+                    one_hot_encoding[semantic_categories.index(cat)]
+                    if cat in semantic_categories
+                    else one_hot_encoding[0]
+                ) for cat in semantic_annotations
+            ], dim=0)
+
+        if self.semantic:
+            self.map_state = Categorical2DSemanticMapState(
+                device=device,
+                num_environments=1,
+                num_sem_categories=len(self.semantic_categories),
+                map_resolution=5,
+                map_size_cm=4800,
+                global_downscaling=2,
+            )
+            self._mapper = Categorical2DSemanticMapModule(
+                frame_height=480,            # pix
+                frame_width=640,            # pix
+                camera_height=0.88,         # m
+                hfov=90,                    # deg
+                num_sem_categories=len(semantic_categories),
+                map_size_cm=4800,           # cm
+                map_resolution=5,           # cm
+                vision_range=100,           # no. of map cells
+                explored_radius=150,        # cm
+                been_close_to_radius=200,   # cm
+                global_downscaling=2,
+                du_scale=4,
+                cat_pred_threshold=1.0,
+                exp_pred_threshold=1.0,
+                map_pred_threshold=1.0,
+                min_obs_height_cm=50,
+                min_depth=0.5,              # m
+                max_depth=5.0,              # m
+            )
+        else:
+            self.map_state = GeometricMapState(
+                device=device,
+                num_environments=1,
+                map_resolution=5,
+                map_size_cm=4800,
+                global_downscaling=2,
+            )
+            self._mapper = GeometricMapModule(
+                frame_height=480,           # pix
+                frame_width=640,            # pix
+                camera_height=0.88,         # m
+                hfov=90,                    # deg
+                map_size_cm=4800,           # cm
+                map_resolution=5,           # cm
+                vision_range=100,           # no. of map cells
+                explored_radius=150,        # cm
+                been_close_to_radius=200,   # cm
+                global_downscaling=2,
+                du_scale=4,
+                exp_pred_threshold=1.0,
+                map_pred_threshold=1.0,
+                min_obs_height_cm=50,
+                min_depth=0.5,              # m
+                max_depth=5.0,              # m
+            )
 
         self.mapper = torch.nn.DataParallel(self._mapper, device_ids = [0,2,3])
         self.last_pose = np.zeros(3)
@@ -49,9 +115,17 @@ class Mapper:
     def _preprocess(self, obs):
         rgb_tensor = torch.from_numpy(obs['forward_rgb'])
         depth_tensor = torch.from_numpy(obs['forward_depth']) * 100.0 # convert m -> cm
-        seq_obs = torch.cat(
-            (rgb_tensor, depth_tensor), dim=-1
-        ).permute(2, 0, 1).to(self.device)
+
+        if self.semantic:
+            semantic_obs = torch.from_numpy(obs['forward_semantic'])[:, :, 0]
+            semantic_tensor = self.instance_to_one_hot[semantic_obs]
+            seq_obs = torch.cat(
+                (rgb_tensor, depth_tensor, semantic_tensor), dim=-1
+            ).permute(2, 0, 1).to(self.device)
+        else:
+            seq_obs = torch.cat(
+                (rgb_tensor, depth_tensor), dim=-1
+            ).permute(2, 0, 1).to(self.device)
 
         curr_pose = np.array([obs['gps'][0], -obs['gps'][1], obs['compass'][0]])
         pose_delta = torch.Tensor(
@@ -192,7 +266,20 @@ class Mapper:
 
         self.init = True
 
-    def visualise(self, obs):
+    def get_obstacle_map(self):
+        if self.semantic and self.traversable_categories is not None:
+            obstacle_map = self.map_state.get_obstacle_map(0)
+            for cat in self.traversable_categories:
+                cat_idx = self.semantic_categories.index(cat)
+                cat_map = self.map_state.local_map[0, MC.NON_SEM_CHANNELS + cat_idx].cpu().numpy()
+                cat_mask = ~(cat_map > 0)
+                obstacle_map *= cat_mask.astype(np.float)
+            return obstacle_map
+        else:
+            return self.map_state.get_obstacle_map(0)
+
+
+    def visualise(self, obs, semantic_category=None):
         rgb_frame = obs['forward_rgb']
         depth_frame = obs['forward_depth'][:, :, 0]
         if depth_frame.max() > 0:
@@ -264,6 +351,9 @@ class Mapper:
             0.96,
             0.36,
             0.26,  # visited area
+            0.98,
+            0.50,
+            0.46,  # 1st semantic category
         ]
         map_color_palette = [int(x * 255.0) for x in map_color_palette]
 
@@ -278,6 +368,14 @@ class Mapper:
         vis_map[explored_mask] = 2
         vis_map[obstacle_mask] = 1
         vis_map[visited_mask] = 3
+
+        # TODO: Extracting single category only from map_state. Figure 
+        # out how to use the semantic map from map_state.get_semantic_map
+        # instead for a more general approach.
+        if semantic_category and type(semantic_category) == str:
+            semantic_map = self.map_state.local_map[0, MC.NON_SEM_CHANNELS + 1].cpu().numpy()
+            semantic_mask = semantic_map > 0
+            vis_map[semantic_mask] = 4
 
         geometric_map_vis = Image.new("P", vis_map.shape)
         geometric_map_vis.putpalette(map_color_palette)
