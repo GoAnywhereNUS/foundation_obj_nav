@@ -56,9 +56,22 @@ class NavigatorHomeRobot(Navigator):
             self.goal = "tv"
         # Set up controller
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-        self.controller = FMMController(self.device, env_config=self.config)
+        # self.controller = FMMController(self.device, env_config=self.config)
 
-        # Set up flags
+        selected_traversable_categories = []
+        for i in ["stair", "stairs"]:
+            if i in env_semantic_names:
+                selected_traversable_categories.append(i)
+
+        self.controller = FMMController(
+            self.device, 
+            env_config=self.config,
+            semantic_categories=["others"] + selected_traversable_categories,
+            semantic_annotations=env_semantic_names,
+            traversable_categories=selected_traversable_categories,
+        )
+
+            # Set up flags
         self.controller_active = False
 
         # TODO: Review these variables
@@ -78,7 +91,20 @@ class NavigatorHomeRobot(Navigator):
         if self.goal == "tv_monitor":
             self.goal = "tv"
         # Reset controller
-        self.controller = FMMController(self.device, env_config=self.config)
+       
+        # self.controller = FMMController(self.device, env_config=self.config)
+        selected_traversable_categories = []
+        for i in ["stair", "stairs"]:
+            if i in env_semantic_names:
+                selected_traversable_categories.append(i)
+
+        self.controller = FMMController(
+            self.device, 
+            env_config=self.config,
+            semantic_categories=["others"] + selected_traversable_categories,
+            semantic_annotations=env_semantic_names,
+            traversable_categories=selected_traversable_categories,
+        )
 
         # Reset flags
         self.controller_active = False
@@ -114,7 +140,7 @@ class NavigatorHomeRobot(Navigator):
 
         cv2.namedWindow("View")
 
-        while (self.action_step < self.max_episode_step) and (not self.success_flag) and (self.llm_loop_iter <= 30):
+        while (self.action_step < self.max_episode_step) and (not self.success_flag) and (self.llm_loop_iter <= 40):
             self.action_logging = open(self.action_log_path, 'a')
             obs = self._observe()
             self.controller.update(obs)
@@ -198,7 +224,6 @@ if __name__ == "__main__":
         scnen_path = nav.env.env.current_episode.scene_id
         scnen_name = scnen_path[scnen_path.rfind('/')+1:scnen_path.rfind('.basis')]
         episode = rerun_case[scnen_name]
-        # while nav.env.env.current_episode.episode_id not in ['10', '11', '12'] or ((nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id ) in test_history):
         while nav.env.env.current_episode.episode_id not in [str(i) for i in range(test_episode)] or ((nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id ) in test_history):
             try:
                 print('RESET', nav.env.env.current_episode.episode_id,nav.env.env.current_episode.scene_id )

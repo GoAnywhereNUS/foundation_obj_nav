@@ -187,6 +187,11 @@ class Navigator:
                 return True
             else:
                 return self.goal == label
+        if self.goal == 'plant':
+            if label == 'ornamental plant':
+                return False
+            else:
+                return self.goal in label
         else:
             return self.goal in label
 
@@ -559,7 +564,7 @@ class Navigator:
 
         obj_lst_scene_graph = self.scene_graph.get_secific_type_nodes('object')
         for obj in obj_lst_scene_graph:
-            if goal in obj:
+            if self.check_goal(obj):
                 self.path = [obj]
                 return self.path
 
