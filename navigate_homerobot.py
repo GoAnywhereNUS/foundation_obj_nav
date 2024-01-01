@@ -129,14 +129,16 @@ class NavigatorHomeRobot(Navigator):
                 subgoal_position, cam_uuid = self.loop(obs)
                 print('Set Subgoals:',subgoal_position)
                 if subgoal_position is not None:
-                    self.controller.set_subgoal_image(
-                        subgoal_position,
-                        cam_uuid,
-                        obs,
-                        get_camera_matrix(640, 480, 90)
-                    )
-                    self.controller_active = True
-
+                    try:
+                        self.controller.set_subgoal_image(
+                            subgoal_position,
+                            cam_uuid,
+                            obs,
+                            get_camera_matrix(640, 480, 90)
+                        )
+                        self.controller_active = True
+                    except:
+                        self.action_logging.write(f'ERROR: Cannot set subgoal to controller {subgoal_position}\n')
             # Low-level perception-reasoning. Run all the time.
             # TODO:
 
@@ -149,7 +151,7 @@ class NavigatorHomeRobot(Navigator):
                 print('Control', action, success)
                 if action is None:
                     self.controller_active = False
-                    if self.last_subgoal == self.goal:
+                    if self.check_goal(self.last_subgoal) and success:
                         self.success_flag = True
                         self.action_logging.write(f"[END]: SUCCESS\n")
                 else:
@@ -178,6 +180,10 @@ class NavigatorHomeRobot(Navigator):
             print(i)
             self.env.act('stop')
 
+        for i, obj in enumerate(self.semantic_annotations):
+            if self.check_goal(obj):
+                self.action_logging.write(f"[Goal Check]: id :{i}; obj: {obj}, pos:{self.env.env.sim.semantic_annotations().objects[i].aabb.center} \n")
+
         print(nav.env.get_episode_metrics())
         self.action_logging.write(f"[Metrics]: {nav.env.get_episode_metrics()}\n")
         self.action_logging.close()
@@ -189,6 +195,10 @@ if __name__ == "__main__":
     test_episode = 3
     test_history = []
     while True:
+        scnen_path = nav.env.env.current_episode.scene_id
+        scnen_name = scnen_path[scnen_path.rfind('/')+1:scnen_path.rfind('.basis')]
+        episode = rerun_case[scnen_name]
+        # while nav.env.env.current_episode.episode_id not in ['10', '11', '12'] or ((nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id ) in test_history):
         while nav.env.env.current_episode.episode_id not in [str(i) for i in range(test_episode)] or ((nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id ) in test_history):
             try:
                 print('RESET', nav.env.env.current_episode.episode_id,nav.env.env.current_episode.scene_id )
@@ -196,4 +206,7 @@ if __name__ == "__main__":
             except:
                 sys.exit(0)
         test_history.append(nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id )
-        nav.run()
+        try:
+            nav.run()
+        except:
+            print('error')

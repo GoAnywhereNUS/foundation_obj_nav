@@ -54,7 +54,7 @@ class Navigator:
         self.goal = None
 
         self.action_step = 0
-        self.max_episode_step = 600
+        self.max_episode_step = 500
         self.llm_loop_iter = 0
         self.visualisation = True
         self.is_navigating = False
@@ -177,6 +177,19 @@ class Navigator:
         """
         raise NotImplementedError
 
+    def check_goal(self, label):
+        if self.goal == 'sofa':
+            return self.goal == label
+        if self.goal == 'bed':
+            return self.goal == label
+        if self.goal == 'toilet':
+            if label == 'toilet seat':
+                return True
+            else:
+                return self.goal == label
+        else:
+            return self.goal in label
+
     def perceive(self, images):
         image_locations = {}
         image_objects = {}
@@ -266,7 +279,7 @@ class Navigator:
             candidate_entrances = discript[2]
             candidate_entrances_feature = discript[3]
             discript1 = f"We want to find a {target_node} that is near" + ", ".join(target_feature)
-            discript2 = "Now we have seen the following object: "
+            discript2 = " .Now we have seen the following object: "
             for i, name in enumerate(candidate_entrances):
                 discript2 += f" {name} that is near " + ", ".join(candidate_entrances_feature[i]) +". "
             question = "Please select one object that is most likely to be the object I want to find. Please only select one object and use this element name in answer. Use the exact name in the given sentences. Always follow the format: Answer: <your answer>."
@@ -436,12 +449,16 @@ class Navigator:
                                 find_last_entrance = True
                                 break
                     # TODO: How to select the door just passed by
+                    trial_time = 0
+                    while (not find_last_entrance) and (trial_time < 3):
+                        idx = random.choice(range(len(entrance_lst)))
+                        trial_time += 1
+                        if '_' in entrance_lst[idx]:
+                            entrance_lst[idx] = 'LAST' + entrance_lst[idx]
+                            find_last_entrance = True
                     if not find_last_entrance:
-                        for i, entrance in enumerate(entrance_lst):
-                            if '_' in entrance_lst[i] and random.uniform(0,1) > 0.5:
-                                entrance_lst[i] = 'LAST' + entrance_lst[i]
-                                find_last_entrance = True 
-                                break
+                        self.scene_graph.nodes()[self.last_subgoal]['active'] = False
+
                 elif self.scene_graph.is_type(self.last_subgoal, 'room'):
                     self.scene_graph.add_edge(self.current_state, self.last_subgoal, "connects to")
                     self.explored_node.append(self.last_subgoal)
@@ -613,8 +630,44 @@ class Navigator:
             self.last_subgoal = path[0]
         self.path = path
         
-        if self.scene_graph.is_type(self.last_subgoal, 'room'):
-            self.last_subgoal = random.choice(self.scene_graph.get_related_codes(self.last_subgoal, 'contains'))
+        if self.scene_graph.is_type(self.last_subgoal, 'room'): #TODO: add local exploration here
+            # self.last_subgoal = random.choice(self.scene_graph.get_related_codes(self.last_subgoal, 'contains'))
+
+            obj_lst = self.scene_graph.get_related_codes(self.current_state, 'contains')
+            sg_obj_Discript = "["+ ", ".join(obj_lst) + "]"
+            whole_query = self.generate_query(sg_obj_Discript, self.last_subgoal, 'local')
+            
+            store_ans = []
+            nodes_in_view = self.scene_graph.nodes(active_flag=True)
+
+            for i in range(self.llm_max_query):
+                seperate_ans = self.llm.query_local_explore(whole_query)
+                print(seperate_ans)
+                if len(seperate_ans) > 0:
+                    if seperate_ans[0] in nodes_in_view:
+                        store_ans.append(seperate_ans[0])
+                    elif seperate_ans[-1] in nodes_in_view:
+                         store_ans.append(seperate_ans[-1])
+                if len(store_ans)  >= self.llm_sampling_query:
+                    break
+
+            goal_node_name = most_common(store_ans)
+            if goal_node_name == None:
+                goal_node_name = random.choice(obj_lst)
+
+            self.last_subgoal = goal_node_name
+            path = [goal_node_name]
+            self.path = path
+        
+        if len(self.explored_node) > 2:
+            if  (self.check_goal(self.last_subgoal)) and self.explored_node[-1] == self.last_subgoal and self.explored_node[-2] == self.last_subgoal: # Should provide feedback to LLM for replan
+                if self.scene_graph.is_type(self.last_subgoal, 'object'):
+                    self.last_subgoal = random.choice(self.scene_graph.get_related_codes(self.current_state, 'contains'))
+                    self.action_logging.write(f'[Error in Explored Node]: random choose {self.last_subgoal}')
+                elif self.scene_graph.is_type(self.last_subgoal, 'entrance'):
+                    self.last_subgoal = random.choice(self.scene_graph.get_related_codes(self.current_state, 'connects to'))
+                    self.action_logging.write(f'[Error in Explored Node]: random choose {self.last_subgoal}')
+
         print(f'[PLAN INFO] Path:{self.path}')
 
         return path
@@ -635,7 +688,7 @@ class Navigator:
             for i in range(len(img_lang_obs['object'][direction][1])):
                 label = img_lang_obs['object'][direction][1][i]
                 min_x, min_y, max_x, max_y = img_lang_obs['object'][direction][0][i]
-                if self.goal in label:
+                if self.check_goal(label):
                     ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='red', facecolor=(0,0,0,0), lw=2))
                 else:
                     ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
@@ -647,7 +700,7 @@ class Navigator:
         for direction in ['forward', 'left', 'right', 'rear']:
             for i in range(len(img_lang_obs['object'][direction][1])):
                 label = img_lang_obs['object'][direction][1][i]
-                if self.goal in label:
+                if self.check_goal(label):
                     next_position = img_lang_obs['object'][direction][0][i].type(torch.int64).tolist()
                     cam_uuid = direction +'_depth'
                     self.is_navigating = True

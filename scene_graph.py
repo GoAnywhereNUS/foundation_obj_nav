@@ -58,7 +58,10 @@ class SceneGraph:
         Return:
             bool: check whether the node is the specific type or not
         """
-        return self.scene_graph.nodes()[node_name]['type'] == node_type
+        if node_name in self.scene_graph.nodes():
+            return self.scene_graph.nodes()[node_name]['type'] == node_type
+        else:
+            return False
 
     def get_secific_type_nodes(self, node_type = 'room'):
         """
@@ -126,7 +129,7 @@ class SceneGraph:
         if self.scene_graph.has_node(node_name):
             if active_flag:
                 obj_lst = [ item for item in self.scene_graph[node_name]
-                    if self.scene_graph[node_name][item]['relation'] == relation and self.scene_graph.nodes[item]['active'] != False
+                    if self.scene_graph[node_name][item]['relation'] == relation and self.scene_graph.nodes[item]['active'] == True
                 ]
             else:
                 obj_lst = [ item for item in self.scene_graph[node_name]
@@ -148,6 +151,8 @@ class SceneGraph:
         # Check that this type of edge is allowed in the scene graph specs
         src_node_type = self.scene_graph._node[src_node]['type']
         dst_node_type = self.scene_graph._node[dst_node]['type']
+        if edge_type not in self.scene_graph_specs[src_node_type].keys():
+            return False
         if dst_node_type not in self.scene_graph_specs[src_node_type][edge_type]:
             return False
         

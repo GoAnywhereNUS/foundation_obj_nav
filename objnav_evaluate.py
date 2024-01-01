@@ -548,7 +548,18 @@ class NavigatorSimulation(Navigator):
         raise NotImplementedError
 
 
-
+def check_goal(goal, label):
+    if goal == 'sofa':
+        return goal == label
+    if goal == 'bed':
+        return goal == label
+    if goal == 'toilet':
+        if label == 'toilet seat':
+            return True
+        else:
+            return goal == label
+    else:
+        return goal in label
 
 if __name__ == "__main__":
     device = torch.device('cuda:0')
@@ -564,15 +575,40 @@ if __name__ == "__main__":
     # print(random_point)
     
     # for i in random.choice(range(20)):
-    nav.env.reset()
-
+    # nav.env.reset()
+    test_history = []
+    while nav.env.env.current_episode.episode_id not in ['8'] or ((nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id ) in test_history):
+        try:
+            print('RESET', nav.env.env.current_episode.episode_id,nav.env.env.current_episode.scene_id )
+            nav.env.reset()
+        except:
+            sys.exit(0)
+    test_history.append(nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id )
     env_semantic_names = [s.category.name().lower() for s in nav.env.env.sim.semantic_annotations().objects]
+
+    env_semantic_names = ['sofa' if x == 'couch' else x for x in env_semantic_names]
+    env_semantic_names = ['toilet' if x == 'toilet seat' else x for x in env_semantic_names]
+
+    goal = nav.env.env.current_episode.object_category
+    if goal == "tv_monitor":
+        goal = "tv"
+        
+    print(nav.env.env.current_episode.scene_id, nav.env.env.current_episode.episode_id )
+    for i, obj in enumerate(env_semantic_names):
+        if check_goal(goal, obj):
+            print('----------------------------------')
+            print(i, 'Obj',obj, 'Goal', goal)
+            print('Goal', nav.env.env.sim.semantic_annotations().objects[i].aabb.center)
+            print('Pos', nav.env.env.sim.agents[0].get_state().position)
+
+
     nav.semantic_annotations = env_semantic_names
 
-    goal_candidate =['chair', 'couch', 'potted plant', 'bed', 'toilet', 'tv']
-    goal = random.choice(goal_candidate)
-    while goal not in env_semantic_names:
-        goal = random.choice(goal_candidate)
+    # goal_candidate =['chair', 'couch', 'potted plant', 'bed', 'toilet', 'tv']
+    # goal = random.choice(goal_candidate)
+    # while goal not in env_semantic_names:
+    #     goal = random.choice(goal_candidate)
+
     print('Goal', goal)
     pdb.set_trace()
     cv2.namedWindow("Images")
@@ -589,6 +625,7 @@ if __name__ == "__main__":
         images = controller.visualise(obs)
         cv2.imshow("Images", images)
         images = nav._observe()     
+        print(f'[Pos]: {nav.env.env.sim.agents[0].get_state().position} [Rotation]: {nav.env.env.sim.agents[0].get_state().rotation}')
         # pdb.set_trace()   
         key = cv2.waitKey(50)
         if key == ord('a'):
