@@ -10,7 +10,8 @@ import numpy as np
 def set_openai_key(key, org):
     """Sets OpenAI key."""
     openai.api_key = key
-    openai.organization = org
+    if org != None:
+        openai.organization = org
     print("Key successfully set.")
     print("Org:", org)
 
@@ -214,10 +215,10 @@ def ask_gpt(goal, object_clusters):
                 cluser_string += ob + ", "
             options += f"{i+1}. {cluser_string}\n"
         messages.append({"role": "user", "content": f"You see the following clusters of objects:\n\n {options}\nQuestion: You goal is to find a {goal}. Where should you go next? If there is not clear choice select answer 0.\n"})
-        completion = openai.ChatCompletion.create(
+        completion = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=messages)
-        complete_response = completion.choices[0].message["content"]
+        complete_response = completion.choices[0].message.content
         # Make the response all lowercase
         complete_response = complete_response.lower()
         reasoning = complete_response.split("reasoning: ")[1].split("\n")[0]
@@ -244,7 +245,7 @@ def ask_gpts(goal, object_clusters, num_samples=10):
                 cluser_string += ob + ", "
             options += f"{i+1}. {cluser_string}\n"
         messages.append({"role": "user", "content": f"You see the following clusters of objects:\n\n {options}\nQuestion: You goal is to find a {goal}. Where should you go next? If there is not clear choice select answer 0.\n"})
-        completion = openai.ChatCompletion.create(
+        completion = openai.chat.completions.create(
             model="gpt-3.5-turbo", temperature=1,
             n=num_samples, messages=messages)
         
@@ -252,7 +253,7 @@ def ask_gpts(goal, object_clusters, num_samples=10):
         reasonings = []
         for choice in completion.choices:
             try:
-                complete_response = choice.message["content"]
+                complete_response = choice.message.content
                 # Make the response all lowercase
                 complete_response = complete_response.lower()
                 reasoning = complete_response.split("reasoning: ")[1].split("\n")[0]
@@ -427,15 +428,16 @@ def ask_gpts_v2(goal, object_clusters, env="a house", positives=True, num_sample
         else:
             messages.append({"role": "user", "content": f"I observe the following clusters of objects while exploring {env}:\n\n {options}\nWhere should I avoid spending time searching if I am looking for {goal}?"})
         
-        completion = openai.ChatCompletion.create(
+        completion = openai.chat.completions.create(
             model=model, temperature=1,
             n=num_samples, messages=messages)
         
         answers = []
         reasonings = []
+
         for choice in completion.choices:
             try:
-                complete_response = choice.message["content"]
+                complete_response = choice.message.content
                 # Make the response all lowercase
                 complete_response = complete_response.lower()
                 if reasoning_enabled:
@@ -549,11 +551,11 @@ def query_llm(method: int, object_clusters: list, goal: str, save_reasoning: boo
             else:
                 language_scores[0] = value
     elif method == 2:
-        try:
-            answer_counts, reasoning = ask_gpts_v2(goal, query, positives=True, reasoning_enabled=reasoning_enabled)
-        except Exception as excptn:
-            answer_counts, reasoning = {}, "GPTs failed"
-            print("GPTs failed:", excptn)
+        # try:
+        answer_counts, reasoning = ask_gpts_v2(goal, query, positives=True, reasoning_enabled=reasoning_enabled)
+        # except Exception as excptn:
+        #     answer_counts, reasoning = {}, "GPTs failed"
+        #     print("GPTs failed:", excptn)
         language_scores = [0] * len(object_clusters_tuple)
         for key, value in answer_counts.items():
             for i, x in enumerate(object_clusters_tuple):
@@ -630,8 +632,8 @@ def aggregate_reasoning(reasoning: list):
         prompt += f"Reasoning {i}: {r}\n"
 
     messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}]
-    completion = openai.ChatCompletion.create(
+    completion = openai.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=messages)
-    complete_response = completion.choices[0].message["content"]
+    complete_response = completion.choices[0].message.content
     return complete_response

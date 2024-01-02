@@ -221,9 +221,9 @@ class Navigator:
                         max_x = np.max(instance_index[:,1])
                         if (max_x - min_x) * (max_y - min_y) < 50:
                             continue
-                        elif (max_x - min_x) * (max_y - min_y) < 200 and self.goal not in instance_label:
+                        elif (max_x - min_x) * (max_y - min_y) < 200 and (not self.check_goal(instance_label)):
                             continue
-                        elif (max_x - min_x) * (max_y - min_y) < 1000 and random.uniform(0,1) > 0.2 and self.goal not in instance_label:
+                        elif (max_x - min_x) * (max_y - min_y) < 1000 and random.uniform(0,1) > 0.2 and (not self.check_goal(instance_label)):
                             continue
                         objlabel_lst.append(instance_label)
                         bbox_lst.append([min_x, min_y, max_x, max_y])

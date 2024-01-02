@@ -3,9 +3,6 @@ import cv2
 import skimage.morphology
 from sklearn.cluster import AgglomerativeClustering
 
-import sys
-sys.path.insert(0, '/home/zhanxin/Desktop/home-robot/src/home_robot')
-
 from home_robot.navigation_planner.fmm_planner import FMMPlanner
 
 # Select mapping based on what semantic detector you are using. If using the groun truth detector use LABEL_MAP

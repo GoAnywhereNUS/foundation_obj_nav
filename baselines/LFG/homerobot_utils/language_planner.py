@@ -16,9 +16,6 @@ import skimage.morphology
 import concurrent.futures
 from skimage.morphology import remove_small_objects
 
-import sys
-sys.path.insert(0, '/home/zhanxin/Desktop/home-robot/src/home_robot')
-
 import home_robot.utils.pose as pu
 from home_robot.core.interfaces import (
     ContinuousNavigationAction,

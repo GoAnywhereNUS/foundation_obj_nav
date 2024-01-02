@@ -9,10 +9,6 @@ import numpy as np
 import torch
 from torch.nn import DataParallel
 
-# TODO Install home_robot, home_robot_sim and remove this
-import sys
-sys.path.insert(0, '/home/zhanxin/Desktop/home-robot/src/home_robot')
-
 import home_robot.utils.pose as pu
 from home_robot.core.abstract_agent import Agent
 from home_robot.core.interfaces import DiscreteNavigationAction, Observations
@@ -21,7 +17,7 @@ from home_robot.mapping.semantic.categorical_2d_semantic_map_state import (
 )
 
 from .language_planner import LanguagePlanner
-from home_robot.navigation_planner.language_planner_utils import REDNET_LABEL_MAP, DETECTRON2_LABEL_MAP, LABEL_MAP
+from .language_planner_utils import REDNET_LABEL_MAP, DETECTRON2_LABEL_MAP, LABEL_MAP
 from home_robot.agent.objectnav_agent.objectnav_agent_module import ObjectNavAgentModule
 
 # For visualizing exploration issues
@@ -100,7 +96,7 @@ class ObjectNavAgent(Agent):
             map_update_frequency=config.AGENT.PLANNER.map_update_frequency,
             discrete_actions=config.AGENT.PLANNER.discrete_actions,
             openai_key=config.OPENAI_KEY,
-            openai_org=config.OPENAI_ORG,
+            # openai_org=config.OPENAI_ORG,
             mapping=get_semantic_label_mapping(config.SEMANTIC_MODEL if not config.GROUND_TRUTH_SEMANTICS else "gt"),
         )
         self.one_hot_encoding = torch.eye(
