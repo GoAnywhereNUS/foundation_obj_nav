@@ -173,6 +173,17 @@ class FMMController(Controller):
         self.min_tracking_goal_dist_step = 0
         self.num_steps = 0
 
+        self.col_width = None
+        self.collision_threshold = 0.20
+        self.collision_map = None
+        map_size_cm = 4800
+        map_resolution = 5
+        self.collision_map_shape = (
+            map_size_cm // map_resolution,
+            map_size_cm // map_resolution,
+        )
+        self.use_collision = False
+
         # Debug
         self.vis_dist_map = None
         self.goal_local_cell = None
@@ -358,6 +369,9 @@ class FMMController(Controller):
         self.num_steps = 0
         self.min_tracking_goal_dist = np.inf
         self.min_tracking_goal_dist_step = 0
+        
+        self.col_width = 1
+        self.collision_map = np.zeros(self.collision_map_shape)
 
     def reset_subgoal(self):
         self.set_goal_global = None
@@ -429,7 +443,7 @@ class FMMController(Controller):
         obstacle_map = self.mapper.get_obstacle_map()
         
         # Get current pose and long-term goal
-        px, py, po, ly1, _, lx1, _ = self.mapper.map_state.get_planner_pose_inputs(0)
+        px, py, po, ly1, ly2, lx1, lx2 = self.mapper.map_state.get_planner_pose_inputs(0)
         local_xy = self.mapper.global_pose_to_local_map_cell(
             torch.tensor([px, py, po], device=self.device)
         )[:2]
@@ -461,11 +475,20 @@ class FMMController(Controller):
                     self.prev_action = action
                     self.prev_map_pose = [px, py, po]
                     return action, False
+                
+        elif self.use_collision:
+            self._check_collision(px, py, po)
 
         # Dilate obstacles to get traversability map
         obstacle_map = np.rint(obstacle_map)
         dilated_obstacles = cv2.dilate(obstacle_map, self.obs_dilation_selem, iterations=1)
         traversable = 1 - dilated_obstacles
+
+        if self.use_collision:
+            x1, y1 = (0, 0)
+            x2, y2 = obstacle_map.shape
+            traversable[self.collision_map[ly1:ly2, lx1:lx2][x1:x2, y1:y2] == 1] = 0
+
         agent_rad = self.agent_cell_radius
         traversable[
             curr_grid_pose[0] - agent_rad : curr_grid_pose[0] + agent_rad + 1,
@@ -650,6 +673,48 @@ class FMMController(Controller):
             else:
                 # prev_action is a Continuous action
                 raise NotImplementedError
+            
+    def _check_collision(self, px, py, ptheta):
+        """Check whether we had a collision and update the collision map."""
+        x1, y1, t1 = self.prev_map_pose
+        x2, y2, _ = px, py, ptheta
+        buf = 4
+        length = 2
+
+        # You must move at least 5 cm when doing forward actions
+        # Otherwise we assume there has been a collision
+        if abs(x1 - x2) < 0.05 and abs(y1 - y2) < 0.05:
+            self.col_width += 2
+            if self.col_width == 7:
+                length = 4
+                buf = 3
+            self.col_width = min(self.col_width, 5)
+        else:
+            self.col_width = 1
+
+        dist = pu.get_l2_distance(x1, x2, y1, y2)
+
+        if dist < self.collision_threshold:
+            # We have a collision
+            width = self.col_width
+
+            # Add obstacles to the collision map
+            for i in range(length):
+                for j in range(width):
+                    wx = x1 + 0.05 * (
+                        (i + buf) * np.cos(np.deg2rad(t1))
+                        + (j - width // 2) * np.sin(np.deg2rad(t1))
+                    )
+                    wy = y1 + 0.05 * (
+                        (i + buf) * np.sin(np.deg2rad(t1))
+                        - (j - width // 2) * np.cos(np.deg2rad(t1))
+                    )
+                    r, c = wy, wx
+                    r, c = int(r * 100 / self.map_resolution), int(
+                        c * 100 / self.map_resolution
+                    )
+                    [r, c] = pu.threshold_poses([r, c], self.collision_map.shape)
+                    self.collision_map[r, c] = 1
 
     def _get_servo_action(self, rel_stg, curr_pose):
         stg_x, stg_y, stg_angle = rel_stg

@@ -16,6 +16,9 @@ import skimage.morphology
 import concurrent.futures
 from skimage.morphology import remove_small_objects
 
+# import sys
+# sys.path.insert(0, '/home/zhanxin/Desktop/home-robot/src/home_robot')
+
 import home_robot.utils.pose as pu
 from home_robot.core.interfaces import (
     ContinuousNavigationAction,
@@ -25,7 +28,7 @@ from home_robot.utils.geometry import xyt_global_to_base
 
 from home_robot.navigation_planner.fmm_planner import FMMPlanner
 
-from .language_planner_utils import filter_semantic_map, get_object_info, dialte_and_compute_distances, compute_min_object_distances, cluster_object_distances, assign_frontier_to_cluser, list_objects_in_clusters, REDNET_LABEL_MAP, LABEL_MAP
+from .language_planner_utils import filter_semantic_map, get_object_info, dialte_and_compute_distances, compute_min_object_distances, cluster_object_distances, assign_frontier_to_cluser, list_objects_in_clusters, REDNET_LABEL_MAP, LABEL_MAP, DiscreteRecovery
 from .language_tools import query_llm, set_openai_key, aggregate_reasoning
 
 CM_TO_METERS = 0.01
@@ -140,6 +143,11 @@ class LanguagePlanner:
         self.steps = 0
         self.last_goal_point = None
 
+        # Recovery heuristics
+        self.recovering = False
+        self.perform_recovery = False
+        self.recovery_heuristic = None
+        self.rng = np.random.default_rng(12345)
 
         # ----------------- Language guidance -----------------
         self.disable_reasoning = disable_reasoning
@@ -254,6 +262,7 @@ class LanguagePlanner:
         # Check collisions if we have just moved and are uncertain
         if self.last_action == DiscreteNavigationAction.MOVE_FORWARD:
             self._check_collision()
+        
 
         # High-level goal -> short-term goal
         # Extracts a local waypoint
@@ -437,6 +446,17 @@ class LanguagePlanner:
             else:
                 action = DiscreteNavigationAction.STOP
                 print("!!! DONE !!!")
+
+        # If in recovery mode override the local policy
+        if self.recovering:
+            # Take recovery actions instead of using the local policy
+            recovery_action, done, mode = self.recovery_heuristic.get_recovery_action([start_x, start_y, start_o])
+
+            if done:
+                self.recovering = False
+                self.recovery_heuristic = None
+            else:
+                action = recovery_action
 
         self.last_action = action
         return action, closest_goal_map, short_term_goal, dilated_obstacles
@@ -779,23 +799,29 @@ class LanguagePlanner:
         dist = pu.get_l2_distance(x1, x2, y1, y2)
 
         if dist < self.collision_threshold:
-            # We have a collision
-            width = self.col_width
+            if self.perform_recovery:
+                if self.recovery_heuristic is None:
+                    sampled_action = DiscreteNavigationAction.TURN_LEFT if self.rng.random < 0.5 else DiscreteNavigationAction.TURN_RIGHT
+                    self.recovery_heuristic = DiscreteRecovery(sampled_action)
+                    self.recovering = True
+            else:
+                # We have a collision
+                width = self.col_width
 
-            # Add obstacles to the collision map
-            for i in range(length):
-                for j in range(width):
-                    wx = x1 + 0.05 * (
-                        (i + buf) * np.cos(np.deg2rad(t1))
-                        + (j - width // 2) * np.sin(np.deg2rad(t1))
-                    )
-                    wy = y1 + 0.05 * (
-                        (i + buf) * np.sin(np.deg2rad(t1))
-                        - (j - width // 2) * np.cos(np.deg2rad(t1))
-                    )
-                    r, c = wy, wx
-                    r, c = int(r * 100 / self.map_resolution), int(
-                        c * 100 / self.map_resolution
-                    )
-                    [r, c] = pu.threshold_poses([r, c], self.collision_map.shape)
-                    self.collision_map[r, c] = 1
+                # Add obstacles to the collision map
+                for i in range(length):
+                    for j in range(width):
+                        wx = x1 + 0.05 * (
+                            (i + buf) * np.cos(np.deg2rad(t1))
+                            + (j - width // 2) * np.sin(np.deg2rad(t1))
+                        )
+                        wy = y1 + 0.05 * (
+                            (i + buf) * np.sin(np.deg2rad(t1))
+                            - (j - width // 2) * np.cos(np.deg2rad(t1))
+                        )
+                        r, c = wy, wx
+                        r, c = int(r * 100 / self.map_resolution), int(
+                            c * 100 / self.map_resolution
+                        )
+                        [r, c] = pu.threshold_poses([r, c], self.collision_map.shape)
+                        self.collision_map[r, c] = 1

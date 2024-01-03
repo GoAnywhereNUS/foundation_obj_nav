@@ -3,7 +3,13 @@ import cv2
 import skimage.morphology
 from sklearn.cluster import AgglomerativeClustering
 
+# import sys
+# sys.path.insert(0, '/home/zhanxin/Desktop/home-robot/src/home_robot')
+
 from home_robot.navigation_planner.fmm_planner import FMMPlanner
+from home_robot.core.interfaces import (
+    DiscreteNavigationAction,
+)
 
 # Select mapping based on what semantic detector you are using. If using the groun truth detector use LABEL_MAP
 
@@ -171,3 +177,75 @@ def list_objects_in_clusters(labels, semantic_labels, mapping=REDNET_LABEL_MAP):
         l.sort()
         semantic_cluster_labels[i] = l
     return semantic_cluster_labels
+
+
+class DiscreteRecovery:
+    def __init__(self, turning_action):
+        self.prev_map_pose = None
+        self.current_mode = "turn"
+        self.max_num_turn_steps = 35
+        self.turning_action = turning_action
+
+        # State tracking
+        self.perturbation_actions = [DiscreteNavigationAction.MOVE_FORWARD, DiscreteNavigationAction.MOVE_FORWARD]
+        self.num_turn_steps = 0
+
+    def get_recovery_action(self, pose):
+        if self.prev_map_pose is None:
+            self.prev_map_pose = pose
+            self.num_turn_steps += 1
+            action = "turn_left"
+            done = False
+
+            return action, done, self.current_mode
+
+        px, py, ptheta = pose
+        prev_x, prev_y, prev_theta = self.prev_map_pose
+
+        # Finite state machine for recovery. Basically:
+        # turn -> probe -> perturb -> done
+        #  |  ^____|  |      ^__|
+        #  V          V
+        # failed     failed
+        if self.current_mode == "turn":
+            # Check effects of turn action (Note: currently ignore effects
+            # because we assume turn always succeeds. Directly switch to probe.)
+            self.current_mode = (
+                "probe" if self.num_turn_steps < self.max_num_turn_steps
+                else "failed"
+            )
+        
+        elif self.current_mode == "probe":
+            # Check effects of probing
+            probe_success = abs(prev_x - px) > 0.05 or abs(prev_y - py) > 0.05
+            self.current_mode = "perturb" if probe_success else "turn"
+
+        elif self.current_mode == "perturb":
+            self.current_mode = "perturb" if len(self.perturbation_actions) > 0 else "done"
+
+        elif self.current_mode == "done":
+            pass
+
+        elif self.current_mode == "failed":
+            pass
+
+        else:
+            raise NotImplementedError
+        
+        # Update flags, action to take based on current mode
+        if self.current_mode == "turn":
+            action, done = self.turning_action, False
+            print(">>> Recovery:", action)
+            self.num_turn_steps += 1
+        elif self.current_mode == "probe":
+            print(">>> Recovery: PROBE FORWARD")
+            action, done = "move_forward", False
+        elif self.current_mode == "perturb":
+            action, done = self.perturbation_actions[0], False
+            print(">>> Recovery: PERTURB", action)
+            self.perturbation_actions.pop(0)
+        elif self.current_mode == "done" or self.current_mode == "failed":
+            print(">>> Recovery: TERMINATING (", self.current_mode, ")")
+            action, done = None, True
+
+        return action, done, self.current_mode
