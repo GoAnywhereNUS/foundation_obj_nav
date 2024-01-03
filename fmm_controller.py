@@ -175,14 +175,14 @@ class FMMController(Controller):
 
         self.col_width = None
         self.collision_threshold = 0.20
-        self.collision_map = None
         map_size_cm = 4800
         map_resolution = 5
         self.collision_map_shape = (
             map_size_cm // map_resolution,
             map_size_cm // map_resolution,
         )
-        self.use_collision = False
+        self.use_collision = True
+        self.collision_map = np.zeros(self.collision_map_shape)
 
         # Debug
         self.vis_dist_map = None
@@ -487,7 +487,7 @@ class FMMController(Controller):
         if self.use_collision:
             x1, y1 = (0, 0)
             x2, y2 = obstacle_map.shape
-            traversable[self.collision_map[ly1:ly2, lx1:lx2][x1:x2, y1:y2] == 1] = 0
+            traversable[self.collision_map[int(ly1):int(ly2), int(lx1):int(lx2)][int(x1):int(x2), int(y1):int(y2)] == 1] = 0
 
         agent_rad = self.agent_cell_radius
         traversable[
@@ -781,14 +781,14 @@ if __name__ == "__main__":
     obs = env.reset()
 
     env_semantic_names = [s.category.name().lower() for s in env.env.sim.semantic_annotations().objects]
-    stairs_instances = [i for i, name in enumerate(env_semantic_names) if name == "stairs"]
+    stairs_instances = [i for i, name in enumerate(env_semantic_names) if name == "stairs" or name == 'stair']
     print("Stairs instances:", stairs_instances)
 
     controller = FMMController(
         device, 
-        semantic_categories=["others", "stairs"],
+        semantic_categories=["others", "stairs", "stair"],
         semantic_annotations=env_semantic_names,
-        traversable_categories=["stairs"],
+        traversable_categories=["stairs",'stair'],
     )
 
     import cv2
