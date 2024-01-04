@@ -28,8 +28,7 @@ LABEL_MAP = {
     11: "clock",
     12: "vase",
     13: "cup",
-    14: "bottle",
-    15: "door"
+    14: "bottle"
 }
 
 REDNET_LABEL_MAP = [
@@ -161,16 +160,9 @@ def list_objects_in_clusters(labels, semantic_labels, mapping=REDNET_LABEL_MAP):
     """
     # Print all the semantic ids in each cluster object_cluster_semantic_labels
     semantic_cluster_labels = {}
-    if mapping == REDNET_LABEL_MAP:
-        unknown = 15
-    elif mapping == LABEL_MAP:
-        unknown = 16
-    else:
-        raise NotImplementedError
     for i, label in enumerate(np.unique(labels)):
         objs = semantic_labels[labels == label]
-        # print('objs', objs)
-        l =  [mapping[obj] for obj in objs if obj != unknown]
+        l =  [mapping[obj] for obj in objs if obj != 15]
         # Remove duplicates 
         l = list(set(l))
         # Sort in alphabetical order
