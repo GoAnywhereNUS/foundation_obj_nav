@@ -427,7 +427,7 @@ class Navigator:
         if est_state != None:
             self.current_state = est_state
             print(f'Existing node: {self.current_state}')
-            to_be_updated_nodes = self.scene_graph.update_node(self.current_state)
+            to_be_updated_nodes, to_be_updated_nodes_feat = self.scene_graph.update_node(self.current_state)
             self.explored_node.append(self.last_subgoal) #TODO: check when we add this
             # TODO: how we update explored node
 
@@ -467,6 +467,9 @@ class Navigator:
                 elif self.scene_graph.is_type(self.last_subgoal, 'room'):
                     self.scene_graph.add_edge(self.current_state, self.last_subgoal, "connects to")
                     self.explored_node.append(self.last_subgoal)
+                else:
+                    self.explored_node.append(self.last_subgoal)
+
             print(f'Add new node: {self.current_state}')
         
         self.action_logging.write(f'[State]: {self.current_state}\n')
@@ -527,11 +530,9 @@ class Navigator:
             if len(current_entrance) > 0:
                 print(' *** UPDATING ENTEANCE ***')
                 current_entrance_feature = [self.scene_graph.get_related_codes(node,'is near') for node in current_entrance]
-                for target_node in to_be_updated_nodes:
-                    target_features = self.scene_graph.get_related_codes(target_node,'is near')
-        
+                for i, target_node in enumerate(to_be_updated_nodes):
+                    target_features = to_be_updated_nodes_feat[i]
                     whole_query = self.generate_query([target_node, target_features, current_entrance, current_entrance_feature], None, 'node_feature')
-                    
                     store_ans = []
                     for i in range(self.llm_max_query):
                         seperate_ans = self.llm.query_node_feature(whole_query)
@@ -604,8 +605,13 @@ class Navigator:
         # If we are already in the target room, Start local exploration in the room
         if path[-1] == self.current_state:
             self.explored_node.append(self.current_state)
-            obj_lst = self.scene_graph.get_related_codes(self.current_state, 'contains')
-            sg_obj_Discript = "["+ ", ".join(obj_lst) + "]"
+            obj_lst = self.scene_graph.get_related_codes(self.current_state, 'contains', active_flag = False)
+            cleaned_obj_lst = obj_lst.copy()
+            for obj in obj_lst:
+                if obj in self.explored_node:
+                    obj_name = obj[:obj.index('_')]
+                    cleaned_obj_lst = [element for element in cleaned_obj_lst if not element.startswith(obj_name)]
+            sg_obj_Discript = "["+ ", ".join(cleaned_obj_lst) + "]"
             whole_query = self.generate_query(sg_obj_Discript, goal, 'local')
             
             store_ans = []

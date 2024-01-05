@@ -95,16 +95,19 @@ class SceneGraph:
     def update_node(self, room_name):
         entrances = self.get_related_codes(room_name, 'connects to')
         saved_entrances = []
+        saved_entrances_feat = []
         saved_objects = []
         for entr in entrances:
             self.scene_graph.nodes[entr]['active'] = False
             if len(self.get_related_codes(entr, 'connects to')) > 1:
                 saved_entrances.append(entr)
+                target_features = self.get_related_codes(entr,'is near')
+                saved_entrances_feat.append(target_features)
 
         objects = self.get_related_codes(room_name, 'contains')
         for obj in objects:
             self.scene_graph.nodes[obj]['active'] = False
-        return saved_entrances
+        return saved_entrances, saved_entrances_feat
 
     def combine_node(self, node1, node2):
         if self.scene_graph.nodes[node1]['active'] == False:
