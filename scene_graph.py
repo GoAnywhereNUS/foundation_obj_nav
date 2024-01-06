@@ -287,7 +287,14 @@ class SceneGraph:
         return node_name + "_" + str(num_name_instances + 1)
     
     def plan_shortest_paths(self, current_node_name, goal_node_name):
-        path = nx.shortest_path(self.scene_graph, current_node_name, goal_node_name)
+        temp_scene_graph =  self.scene_graph.copy()
+        for node in self.scene_graph.nodes():
+            if self.scene_graph.nodes()[node]['active'] == False and (node in temp_scene_graph.nodes()):
+                temp_scene_graph.remove_node(node)
+        try:
+            path = nx.shortest_path(temp_scene_graph, current_node_name, goal_node_name)
+        except:
+            path = nx.shortest_path(self.scene_graph, current_node_name, goal_node_name)
         return path
     
 if __name__ == "__main__":

@@ -72,7 +72,7 @@ class Navigator:
         # Note: Env and controller to be implemented in subclass
 
         # TODO: Review these variables and parameters.
-        self.defined_entrance = []
+        self.defined_entrance = ['door', 'doorway', 'doorframe', 'window']
 
 
     def reset(self):
@@ -160,8 +160,13 @@ class Navigator:
                 obj_img = self.scene_graph.get_node_attr(obj_name)['image']
             else:
                 obj_img = obj_cropped_img_lst[i]
-            color = self.query_vqa(obj_img, f"What color is the {obj_name.split('_')[0]}?")
-            material = self.query_vqa(obj_img, f"What material is the {obj_name.split('_')[0]}?")
+            try:
+                color = self.query_vqa(obj_img, f"What color is the {obj_name.split('_')[0]}?")
+                material = self.query_vqa(obj_img, f"What material is the {obj_name.split('_')[0]}?")
+            except:
+                print(f'[Error] Cannot load image for {obj_name}')
+                color = ''
+                material = ''
             descript =  color + ' ' + material + ' '+ obj_name.split('_')[0]
             update_descript_list.append(descript)
         return update_descript_list
@@ -179,7 +184,10 @@ class Navigator:
 
     def check_goal(self, label):
         if self.goal == 'sofa':
-            return self.goal == label
+            if 'couch' in label:
+                return True
+            else:
+                return self.goal in label
         if self.goal == 'bed':
             return self.goal == label
         if self.goal == 'toilet':
@@ -190,6 +198,11 @@ class Navigator:
         if self.goal == 'plant':
             if label == 'ornamental plant':
                 return False
+            else:
+                return self.goal in label
+        if self.goal == 'tv':
+            if 'television' in label:
+                return True
             else:
                 return self.goal in label
         else:
@@ -231,12 +244,28 @@ class Navigator:
                 objects = (torch.tensor(bbox_lst), objlabel_lst, cropped_img_lst)
             
             else:
-                if (self.query_vqa(image, "Is there a door in the photo?") == 'yes'
-                    and len(self.defined_entrance) > 0
-                ):
-                    objects = self.query_objects(image,  self.defined_entrance)
+                modified_entrance = []
+                if (self.query_vqa(image, "Is there a door in the photo?") == 'yes'):
+                    modified_entrance += self.defined_entrance
+                if (self.query_vqa(image, f"Is there a {self.goal} in the photo?") == 'yes'):
+                    modified_entrance += [self.goal]
+                if len(modified_entrance) > 0 :
+                    objects = self.query_objects(image,  modified_entrance)
                 else:
                     objects = self.query_objects(image)
+                remove_id = []
+                for i, objlabel in enumerate(objects[1]):
+                    if 'glass' in objlabel:
+                        remove_id +=  self.get_nearby_bbox(objects[0][i], objects[0], overlap_threshold = 0.7, distance_threshold = 0)
+                bbox_lst = []
+                objlabel_lst = []
+                cropped_img_lst = []
+                for i, objlabel in enumerate(objects[1]):
+                    if i not in remove_id:
+                        bbox_lst.append(objects[0][i])
+                        objlabel_lst.append(objlabel)
+                        cropped_img_lst.append(objects[2][i])
+                objects = (torch.stack(bbox_lst, 0), objlabel_lst, cropped_img_lst)
             image_objects[label] = objects
 
         # TODO: Implement some reasonable fusion across all images
@@ -671,15 +700,40 @@ class Navigator:
             self.path = path
         
         if len(self.explored_node) > 2:
-            if  (self.check_goal(self.last_subgoal)) and self.explored_node[-1] == self.last_subgoal and self.explored_node[-2] == self.last_subgoal: # Should provide feedback to LLM for replan
-                if self.scene_graph.is_type(self.last_subgoal, 'object'):
-                    self.last_subgoal = random.choice(self.scene_graph.get_related_codes(self.current_state, 'contains'))
+            if self.scene_graph.is_type(self.last_subgoal, 'object'):
+                active_obj = self.scene_graph.get_related_codes(self.current_state, 'contains')
+                if (self.last_subgoal in active_obj) and (self.explored_node[-1] in active_obj) and (self.explored_node[-1].split('_')[0] == self.last_subgoal.split('_')[0]):
+                    self.last_subgoal = random.choice(active_obj)
                     self.action_logging.write(f'[Error in Explored Node]: random choose {self.last_subgoal}')
-                elif self.scene_graph.is_type(self.last_subgoal, 'entrance'):
-                    self.last_subgoal = random.choice(self.scene_graph.get_related_codes(self.current_state, 'connects to'))
+            elif self.scene_graph.is_type(self.last_subgoal, 'entrance'):
+                active_entr = self.scene_graph.get_related_codes(self.current_state, 'connects to')
+                if (self.last_subgoal in active_entr) and (self.explored_node[-1] in active_entr) and (self.explored_node[-1].split('_')[0] == self.last_subgoal.split('_')[0]):
+                    if len(active_entr) <= 1:
+                        self.last_subgoal = random.choice(self.scene_graph.get_related_codes(self.current_state, 'contains'))
+                        self.action_logging.write(f'[Error in Explored Node]: random choose {self.last_subgoal}')
+                    else:
+                        clean_active_entr = [ i for i in active_entr if i != self.last_subgoal]
+                        self.last_subgoal = random.choice(clean_active_entr)
+                        self.action_logging.write(f'[Error in Explored Node]: random choose {self.last_subgoal}')
+
+        if self.scene_graph.nodes()[self.last_subgoal]['active'] == False:
+            self.action_logging.write(f'[Error in Explored Node]: Inactive node {self.last_subgoal}')
+            if self.scene_graph.is_type(self.last_subgoal, 'entrance'):
+                active_entr = self.scene_graph.get_related_codes(self.current_state, 'connects to')
+                if len(active_entr) > 0 :
+                    self.last_subgoal = random.choice(active_entr)
+                    self.action_logging.write(f'[Error in Explored Node]: random choose {self.last_subgoal}')
+            # if after update entrance, still cannot fing the valid entrance.
+            if self.scene_graph.nodes()[self.last_subgoal]['active'] == False:
+                active_obj = self.scene_graph.get_related_codes(self.current_state, 'contains')
+                if len(active_obj) > 0:
+                    self.last_subgoal = random.choice(active_obj)
                     self.action_logging.write(f'[Error in Explored Node]: random choose {self.last_subgoal}')
 
         print(f'[PLAN INFO] Path:{self.path}')
+        print(f'[Last Subgoal] Path:{self.last_subgoal}')
+        self.action_logging.write(f'[PLAN INFO] Path:{self.path}\n')
+        self.action_logging.write(f'[Last Subgoal] Path:{self.last_subgoal}\n')
 
         return path
 
