@@ -34,13 +34,6 @@ habitat:
     turn_angle: 10
     agents:
       main_agent:
-        sim_sensors:
-          semantic_sensor:
-            width: 640
-            height: 480
-            hfov: 90
-            position: [0, 0.88, 0]
-            orientation: [0, 0, 0]
         height: 0.88
         radius: 0.05
     habitat_sim_v0:
@@ -49,9 +42,8 @@ habitat:
 
   dataset:
     type: 'ObjectNav-v1'
-    scenes_dir: "/home/zhanxin/foundation_obj_nav/baselines/LFG/data/scene_datasets/"
-    data_path: '/home/zhanxin/foundation_obj_nav/baselines/LFG/data/hm3d/val/val.json.gz'
-    # content_scenes: ['qyAac8rV8Zk']
+    scenes_dir: "/data/home/joel/source/foundation_obj_nav/baselines/LFG/data/scene_datasets/"
+    data_path: "/data/home/joel/storage/objectnav/objectnav_hm3d_v1/val/val.json.gz"
     content_scenes: ['TEEsavR23oF']
     split: val
 
@@ -60,7 +52,7 @@ ENVIRONMENT:
   frame_height: 480       # first-person frame height (in pixels)
   frame_width: 640        # first-person frame width (in pixels)
   camera_height: 0.88     # camera sensor height (in metres)
-  hfov: 79.0              # horizontal field of view (in degrees)
+  hfov: 90                # horizontal field of view (in degrees)
   min_depth: 0.5          # minimum depth for depth sensor (in metres)
   max_depth: 5.0          # maximum depth for depth sensor (in metres)
   evaluate_instance_tracking: False # whether to evaluate the built instance map against groundtruth instance ids
@@ -116,10 +108,4 @@ AGENT:
 #   record_videos: 0          # 1: record videos from printed images, 0: don't
 #   record_planner_videos: 0  # 1: record planner videos (if record videos), 0: don't
 
-sensor_setup: ['forward_rgb', 'forward_depth', 'forward_semantic']
-habitat_data:
-  metadata_path: '/home/zhanxin/foundation_obj_nav/data/val/val.json.gz'
-  # content_scenes: ['qyAac8rV8Zk']
-  content_scenes: ['TEEsavR23oF']
-  # content_scenes: ['TEEsavR23oF', 'wcojb4TFT35', 'svBbv1Pavdk', 'p53SfW6mjZe', 'mL8ThkuaVTM', 'Dd4bFSTQ8gi', 'QaLdnwvtxbs', 'qyAac8rV8Zk', 'q3zU7Yy5E5s', 'zt1RVoi7PcG', 'DYehNKdT76V', 'ziup5kvtCCR', '5cdEh9F2hJL', 'bxsVRursffK', 'mv2HUxq3B53', '4ok3usBNeis', 'XB4GS9ShBRE', 'Nfvxx8J5NCo', '6s7QHgap2fW', 'cvZr5TUy5C5']
-  scenes_dir: "/home/zhanxin/foundation_obj_nav/data/scene_datasets/"
+sensor_setup: ['rgb', 'depth', 'semantic']

@@ -44,40 +44,48 @@ class ThirdSemanticSensorConfig(HabitatSimSemanticSensorConfig):
     width: int = 256
     height: int = 256
 
+def get_sensor_config(config, sensor):
+    assert ('rgb' in sensor
+            or 'depth' in sensor
+            or 'semantic' in sensor), \
+         "Invalid sensor type: " + sensor
 
-sensor_config_dict = {
-            # Smemantic
-            'forward_semantic': ThirdSemanticSensorConfig(
-                height=480,
-                width=640,
-                position=[0, 0.88, 0],
+    if 'rgb' in sensor:
+        return ThirdRGBSensorConfig(
+                height=config.ENVIRONMENT.frame_height,
+                width=config.ENVIRONMENT.frame_width,
+                position=[0, config.ENVIRONMENT.camera_height, 0],
                 orientation=[0, 0, 0],
                 sensor_subtype="PINHOLE",
-                hfov=90,
-                uuid="semantic",
-            ),
-            'forward_rgb': ThirdRGBSensorConfig(
-                height=480,
-                width=640,
-                position=[0, 0.88, 0],
+                hfov=config.ENVIRONMENT.hfov,
+                uuid=sensor,
+        )
+    elif 'depth' in sensor:
+        return ThirdDepthSensorConfig(
+                height=config.ENVIRONMENT.frame_height,
+                width=config.ENVIRONMENT.frame_width,
+                position=[0, config.ENVIRONMENT.camera_height, 0],
                 orientation=[0, 0, 0],
                 sensor_subtype="PINHOLE",
-                hfov=90,
-                uuid="rgb",
-            ),
-            'forward_depth': ThirdDepthSensorConfig(
-                height=480,
-                width=640,
-                position=[0, 0.88, 0],
+                hfov=config.ENVIRONMENT.hfov,
+                min_depth=config.ENVIRONMENT.min_depth,
+                max_depth=config.ENVIRONMENT.max_depth,
+                normalize_depth=True,
+                uuid=sensor,
+        )
+    elif 'semantic' in sensor:
+        return ThirdSemanticSensorConfig(
+                height=config.ENVIRONMENT.frame_height,
+                width=config.ENVIRONMENT.frame_width,
+                position=[0, config.ENVIRONMENT.camera_height, 0],
                 orientation=[0, 0, 0],
                 sensor_subtype="PINHOLE",
-                hfov=90,
-                min_depth=0.0,
-                max_depth=10.0,
-                normalize_depth=False,
-                uuid="depth",
-            )
-        }
+                hfov=config.ENVIRONMENT.hfov,
+                uuid=sensor,
+        )
+    else:
+        # Should not reach here
+        raise Exception
 
 if __name__ == "__main__":
     print("-" * 100)
@@ -118,8 +126,8 @@ if __name__ == "__main__":
 
         # Update Sensor
         config.habitat.simulator.agents.main_agent.sim_sensors = {
-            id : sensor_config_dict[id]
-            for id in config.sensor_setup
+            sensor : get_sensor_config(config, sensor)
+            for sensor in config.sensor_setup
         }
 
     if not use_semantics:
@@ -152,8 +160,6 @@ if __name__ == "__main__":
                 eval_scene = True
                 break
 
-        import pdb
-        pdb.set_trace()
         if not eval_scene or (max_episodes_per_scene != -1 and episode_counts[env.habitat_env.current_episode.scene_id] >= max_episodes_per_scene):
             print(f"Skipping scene {env.habitat_env.current_episode.scene_id} episode {env.habitat_env.current_episode.episode_id}")
             continue
