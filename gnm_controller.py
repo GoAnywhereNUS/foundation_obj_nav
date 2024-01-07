@@ -105,6 +105,3 @@ class GNMController(Controller):
     def visualise(self, obs):
         # TODO: Implement visualisations
         raise NotImplementedError
-    
-    def spin(self):
-        rospy.spin()

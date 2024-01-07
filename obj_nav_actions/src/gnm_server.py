@@ -25,7 +25,7 @@ class GNMNode:
         robot_config_path="../config/spot.yaml", 
         model_config_path="../config/models.yaml", 
     ):
-        # Set up constants and params
+        # Set up params and data structures
         with open(robot_config_path, 'r') as f:
             self.robot_config = yaml.safe_load(f)
         assert self.robot_config is not None
@@ -37,6 +37,10 @@ class GNMNode:
         self.num_samples = args.num_samples
         
         self.curr_sensor_msg = None
+        self.recent_dist_buffer = deque(maxlen=4)
+        self.curr_filtered_dist = None
+        self.min_filtered_dist = np.inf
+        self.stop_dist_threshold = 0.2
 
         # Set up model
         rospy.loginfo("Loading model...")
@@ -95,6 +99,8 @@ class GNMNode:
         )
         self.waypoint_pub = rospy.Publisher("/gnm/waypoint", Float32MultiArray, queue_size=5)
         self.debug_dist_pub = rospy.Publisher("/gnm/dbg_dist", Float32, queue_size=1)
+        self.debug_filtered_pub = rospy.Publisher("/gnm/dbg_filt", Float32, queue_size=1)
+        self.debug_min_pub = rospy.Publisher("/gnm/dbg_min", Float32, queue_size=1)
 
         # Set up ROS server
         rospy.loginfo("Setting up server...")
@@ -112,10 +118,27 @@ class GNMNode:
         pass
 
     def reached_goal(self):
-        if time.time() - self.test_time > 10:
-            return True
-        else:
-            return False
+        # Update distance monitor
+        if self.recent_dist_buffer.maxlen == len(self.recent_dist_buffer):
+            self.curr_filtered_dist = np.mean(self.recent_dist_buffer)
+
+            if (
+                (self.curr_filtered_dist - self.min_filtered_dist)
+                > self.stop_dist_threshold
+            ):
+                return True
+            
+            self.min_filtered_dist = min(
+                self.curr_filtered_dist, 
+                self.min_filtered_dist
+            )
+
+        return False
+
+        # if time.time() - self.test_time > 10:
+        #     return True
+        # else:
+        #     return False
 
     def navigate(self, subgoal):
         rospy.loginfo("Received subgoal!")
@@ -162,7 +185,7 @@ class GNMNode:
 
                         for k in self.noise_scheduler.timesteps[:]:
                             # predict noise
-                            noise_pred = model(
+                            noise_pred = self.model(
                                 'noise_pred_net',
                                 sample=naction,
                                 timestep=k,
@@ -191,10 +214,26 @@ class GNMNode:
                     start_time = time.time()
                     dist, waypoint = self.model(transf_obs_img, transf_goal_img) 
                     dist = to_numpy(dist[0])
+                    self.recent_dist_buffer.append(dist[0])
                     # dist_queue.append(dist[0])
                     waypoint = to_numpy(waypoint[0])
                     chosen_waypoint = waypoint[self.waypoint]
                     elapsed = time.time() - start_time
+
+                # Check success conditions. If we have reached goal, end task
+                # and publish the results. Otherwise publish feedback to the client.
+                if self.reached_goal():
+                    self.debug_dist_pub.publish(dist)
+                    self.debug_filtered_pub.publish(self.curr_filtered_dist)
+                    self.debug_min_pub.publish(self.min_filtered_dist)
+
+                    result = TriggerImageNavResult()
+                    self.server.set_succeeded(result)
+                    return
+                
+                else:
+                    feedback = TriggerImageNavFeedback()
+                    self.server.publish_feedback(feedback)
 
                 # Process and publish predicted waypoint
                 if self.model_params["normalize"]:
@@ -209,16 +248,10 @@ class GNMNode:
                 waypoint_msg.data = chosen_waypoint
                 self.waypoint_pub.publish(waypoint_msg)
 
-                # Check success conditions. If we have reached goal, end task
-                # and publish the results. Otherwise publish feedback to the client.
-                if self.reached_goal():
-                    result = TriggerImageNavResult()
-                    self.server.set_succeeded(result)
-                    return
-                
-                else:
-                    feedback = TriggerImageNavFeedback()
-                    self.server.publish_feedback(feedback)
+                # For debugging
+                self.debug_dist_pub.publish(dist)
+                self.debug_filtered_pub.publish(self.curr_filtered_dist)
+                self.debug_min_pub.publish(self.min_filtered_dist)
 
             rate.sleep()
 
@@ -250,4 +283,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     controller = GNMNode(args)
-    rospy.spin()
