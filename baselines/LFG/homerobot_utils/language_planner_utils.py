@@ -186,7 +186,7 @@ class DiscreteRecovery:
         if self.prev_map_pose is None:
             self.prev_map_pose = pose
             self.num_turn_steps += 1
-            action = "turn_left"
+            action = DiscreteNavigationAction.TURN_LEFT
             done = False
 
             return action, done, self.current_mode
@@ -231,7 +231,7 @@ class DiscreteRecovery:
             self.num_turn_steps += 1
         elif self.current_mode == "probe":
             print(">>> Recovery: PROBE FORWARD")
-            action, done = "move_forward", False
+            action, done = DiscreteNavigationAction.MOVE_FORWARD, False
         elif self.current_mode == "perturb":
             action, done = self.perturbation_actions[0], False
             print(">>> Recovery: PERTURB", action)
