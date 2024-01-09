@@ -40,7 +40,7 @@ class GNMNode:
         self.recent_dist_buffer = deque(maxlen=4)
         self.curr_filtered_dist = None
         self.min_filtered_dist = np.inf
-        self.stop_dist_threshold = 0.2
+        self.stop_dist_threshold = 6.0
 
         # Set up model
         rospy.loginfo("Loading model...")
@@ -93,10 +93,10 @@ class GNMNode:
             "/rs_mid/color/image_raw", 
             Image, self.image_cb, queue_size=1
         )
-        self.odom_sub = rospy.Subscriber(
-            "/spot/odometry", 
-            Odometry, self.odom_cb, queue_size=5
-        )
+        #self.odom_sub = rospy.Subscriber(
+        #    "/spot/odometry", 
+        #    Odometry, self.odom_cb, queue_size=5
+        #)
         self.waypoint_pub = rospy.Publisher("/gnm/waypoint", Float32MultiArray, queue_size=5)
         self.debug_dist_pub = rospy.Publisher("/gnm/dbg_dist", Float32, queue_size=1)
         self.debug_filtered_pub = rospy.Publisher("/gnm/dbg_filt", Float32, queue_size=1)
@@ -111,8 +111,9 @@ class GNMNode:
     def image_cb(self, msg):
         self.curr_sensor_msg = msg
 
-    def odom_cb(self):
-        pass
+    def odom_cb(self, msg):
+        # TODO: Implement
+        return
 
     def update_zupt(self):
         pass
@@ -135,10 +136,12 @@ class GNMNode:
 
         return False
 
-        # if time.time() - self.test_time > 10:
-        #     return True
-        # else:
-        #     return False
+    def reset(self):
+        self.curr_sensor_msg = None
+        self.recent_dist_buffer = deque(maxlen=4)
+        self.curr_filtered_dist = None
+        self.min_filtered_dist = np.inf
+        self.window_context_queue.clear() 
 
     def navigate(self, subgoal):
         rospy.loginfo("Received subgoal!")
@@ -148,6 +151,12 @@ class GNMNode:
         self.test_time = time.time()
 
         while not rospy.is_shutdown():
+            # Check if goal is pre-empted
+            if self.server.is_preempt_requested():
+                rospy.logwarn("Preempt request received. Cancelling goal...")
+                self.server.set_preempted()
+                break
+
             # Get latest observations
             curr_im_pil = msg_to_pil(self.curr_sensor_msg)
             self.window_context_queue.append(curr_im_pil)
@@ -223,12 +232,15 @@ class GNMNode:
                 # Check success conditions. If we have reached goal, end task
                 # and publish the results. Otherwise publish feedback to the client.
                 if self.reached_goal():
+                    rospy.loginfo("Reached goal!")
                     self.debug_dist_pub.publish(dist)
                     self.debug_filtered_pub.publish(self.curr_filtered_dist)
                     self.debug_min_pub.publish(self.min_filtered_dist)
 
                     result = TriggerImageNavResult()
                     self.server.set_succeeded(result)
+
+                    self.reset()
                     return
                 
                 else:
@@ -253,7 +265,14 @@ class GNMNode:
                 self.debug_filtered_pub.publish(self.curr_filtered_dist)
                 self.debug_min_pub.publish(self.min_filtered_dist)
 
+            else:
+                rospy.loginfo("Filling context queue: " + str(len(context_queue)))
+
             rate.sleep()
+
+        # If we exit the loop, we have been preempted
+        self.reset()
+        return
 
 
 if __name__ == "__main__":

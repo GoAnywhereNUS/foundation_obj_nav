@@ -1,6 +1,7 @@
 import cv2
 import PIL as pil
 import numpy as np
+import threading
 import rospy
 import actionlib
 from sensor_msgs.msg import Image
@@ -13,10 +14,13 @@ class SelectImageController:
         self.tlx, self.tly = -1, -1
         self.brx, self.bry = -1, -1
         self.movex, self.movey = -1, -1
-        self.image_crop = None
         self.drawing = False
         self.curr_sensor_msg = None
         self.executing_task = False
+        self.goal_lock = threading.Lock()
+        self.new_goal_flag = False
+        self.image_selection = None
+        self.image_recropped =  None
 
         # Set up ROS node and client
         rospy.init_node("image_controller")
@@ -54,6 +58,16 @@ class SelectImageController:
             done_cb=self.done_cb,
             feedback_cb=self.feedback_cb,
         )
+        rospy.loginfo("Goal sent!")
+        return
+
+    def cancel_goal(self):
+        rospy.loginfo("Sending cancel request!")
+        self.client.cancel_goal()
+        self.image_selection = None
+        self.image_recropped = None
+        cv2.destroyWindow("Selection")
+        cv2.destroyWindow("Recropped")
 
     # Mouse callback function to select rectangular region
     def draw_rectangle(self, event, x, y, flags, param):
@@ -75,17 +89,20 @@ class SelectImageController:
 
             if self.curr_sensor_msg is not None:
                 img = np.asarray(msg_to_pil(self.curr_sensor_msg))
-                cv2.namedWindow("Selected")
-                cv2.imshow("Selected", img[self.tly:self.bry, self.tlx:self.brx])
+                #cv2.namedWindow("Selected")
+                #cv2.imshow("Selected", img[self.tly:self.bry, self.tlx:self.brx])
                 
-                cv2.namedWindow("Crop")
                 cropped = self.bbox2crop(
                     img, self.tlx, self.tly, self.brx, self.bry
                 )
-                cv2.imshow("Crop", cropped)
 
-                self.image_crop = cropped
-                self.send_goal(self.image_crop)
+                #cv2.namedWindow("Crop")
+                #cv2.imshow("Crop", cropped)
+
+                with self.goal_lock:
+                    self.new_goal_flag = True
+                    self.image_selection = img[self.tly:self.bry, self.tlx:self.brx]
+                    self.image_recropped = cropped
 
     # Fit a given bounding box inside an image crop with
     # same aspect ratio as original image
@@ -112,22 +129,39 @@ class SelectImageController:
         return img[tly:bry, tlx:brx]
     
     def spin(self):
-        rate = rospy.Rate(20)
+        #rate = rospy.Rate(20)
 
         while not rospy.is_shutdown():
-            curr_im_array = np.asarray(msg_to_pil(self.curr_sensor_msg))
-            print(self.drawing, self.movex, self.movey)
-            if self.drawing and (self.movex, self.movey) != (-1, -1):
-                cv2.rectangle(curr_im_array, (self.tlx, self.tly), (self.movex, self.movey), (0, 255, 0), 2)
-            cv2.imshow("Viz", curr_im_array)
-            if cv2.waitKey(1) == ord('q'):
-                break
-            if cv2.waitKey(1) == ord('s'):
-                self.image_crop = None
-            if cv2.waitKey(1) == ord('p'):
-                pass
+            with self.goal_lock:
+                if self.new_goal_flag:
+                    self.send_goal(self.image_recropped)
+                    self.new_goal_flag = False
 
-            rate.sleep()
+                    cv2.namedWindow("Selection")
+                    cv2.imshow("Selection", self.image_selection)
+                    cv2.namedWindow("Recropped")
+                    cv2.imshow("Recropped", self.image_recropped)
+                    
+                    #continue
+
+            if self.curr_sensor_msg is not None:
+                curr_im_array = np.asarray(msg_to_pil(self.curr_sensor_msg))
+                #print(self.drawing, self.movex, self.movey)
+                if self.drawing and (self.movex, self.movey) != (-1, -1):
+                    cv2.rectangle(curr_im_array, (self.tlx, self.tly), (self.movex, self.movey), (0, 255, 0), 2)
+                cv2.imshow("Viz", curr_im_array)
+
+                key = cv2.waitKey(50)
+                if key == ord('q'):
+                    break
+                elif key == ord('p'):
+                    pass
+                elif key == ord('c'):
+                    self.cancel_goal()
+            else:
+                rospy.logwarn("Waiting for image messages...")
+
+            #rate.sleep()
 
 
 if __name__ == "__main__":
