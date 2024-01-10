@@ -211,7 +211,9 @@ class Navigator:
     def perceive(self, images):
         image_locations = {}
         image_objects = {}
-        for label in ['left', 'forward', 'right', 'rear']:
+
+        for view in images.keys():
+            label = view.split('_')[0]
             image = images[label + '_rgb']
             image = Image.fromarray(image)
             location = self.query_vqa(image, "Which room is the photo?")
@@ -247,7 +249,13 @@ class Navigator:
                 modified_entrance = []
                 if (self.query_vqa(image, "Is there a door in the photo?") == 'yes'):
                     modified_entrance += self.defined_entrance
-                if (self.query_vqa(image, f"Is there a {self.goal} in the photo?") == 'yes'):
+                if (
+                    self.goal is not None 
+                    and (self.query_vqa(
+                            image, f"Is there a {self.goal} in the photo?"
+                        ) == 'yes'
+                    )
+                ):
                     modified_entrance += [self.goal]
                 if len(modified_entrance) > 0 :
                     objects = self.query_objects(image,  modified_entrance)

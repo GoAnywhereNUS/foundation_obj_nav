@@ -40,7 +40,7 @@ class GNMNode:
         self.recent_dist_buffer = deque(maxlen=4)
         self.curr_filtered_dist = None
         self.min_filtered_dist = np.inf
-        self.stop_dist_threshold = 6.0
+        self.stop_dist_threshold = 4.0
 
         # Set up model
         rospy.loginfo("Loading model...")

@@ -14,7 +14,15 @@ class GNMController(Controller):
         self,
         maintain_aspect=True
     ):
-        super.__init__()
+        super().__init__()
+
+        # ROS node should already have been initialised before,
+        # so we issue a warning if the navigator node can be init
+        try:
+            rospy.init_node("navigator")
+            rospy.logwarn("Navigator node not initialised yet! Initialising...")
+        except rospy.exceptions.ROSException as e:
+            rospy.loginfo("Initialised GNMController in Navigator node.")
 
         # Set up variables
         self.maintain_aspect = maintain_aspect
@@ -22,8 +30,7 @@ class GNMController(Controller):
         self.curr_sensor_msg = None
         self.curr_goal = None
 
-        # Set up ROS node and client
-        rospy.init_node("gnm_controller")
+        # Setting up image_nav action client
         rospy.loginfo("Setting up client...")
         self.client = actionlib.SimpleActionClient('image_nav', TriggerImageNavAction)
         self.client.wait_for_server()
@@ -92,15 +99,20 @@ class GNMController(Controller):
 
     def reset(self):
         # Reset subgoal
-        self.reset_subgoal()
+        self.cancel_goal()
 
         # Reset data structures
         self.curr_goal = None
     
-    def reset_subgoal(self):
+    def cancel_goal(self):
         # Cancel all goals running on the server
-        self.client.cancel_all_goals()
+        # self.client.cancel_all_goals()
+        self.client.cancel_goal()
         self.executing_task = False
+
+    def controller_active(self):
+        # Returns True if the controller is executing_task
+        return self.executing_task
 
     def visualise(self, obs):
         # TODO: Implement visualisations
