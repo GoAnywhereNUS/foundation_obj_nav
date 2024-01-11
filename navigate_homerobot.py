@@ -16,12 +16,11 @@ import pdb
 
 import math
 from utils.mapper import Mapper
-from utils.fmm_planner import FMMPlanner
 from utils.habitat_utils import ObjNavEnv, setup_env_config
 
 import habitat
 from fmm_controller import *
-
+import json
 import random
 import time
 
@@ -32,7 +31,9 @@ class NavigatorHomeRobot(Navigator):
     def __init__(
         self,
         scene_graph_specs=default_scene_graph_specs,
-        llm_config_path="configs/gpt_config.yaml"
+        llm_config_path="configs/gpt_config.yaml",
+        task_config_path = 'configs/objectnav_hm3d_v2_with_semantic.yaml',
+        data_path = "configs/homerobot_hm3d_objectnav.yaml"
     ):
         
         super().__init__(
@@ -43,15 +44,37 @@ class NavigatorHomeRobot(Navigator):
         self.GT = True
 
         # Setup home robot sim environment
-        config = setup_env_config(default_config_path='configs/objectnav_hm3d_v2_with_semantic.yaml')
+        config = setup_env_config(params_path = data_path, default_config_path= task_config_path)
         self.config = config
         self.env = ObjNavEnv(habitat.Env(config=config), config)
 
-        env_semantic_names = [s.category.name().lower() for s in self.env.env.sim.semantic_annotations().objects]
+        if 'hm3d' in task_config_path:
+            self.dataset = 'hm3d'
+            self.goal = self.env.env.current_episode.object_category
+        elif 'gibson' in task_config_path:
+            self.dataset = 'gibson'
+            self.GT = False
+            data_path = self.config.habitat.dataset.data_path[:self.config.habitat.dataset.data_path.find('val.json.gz')]
+            scnen_path = self.env.env.current_episode.scene_id
+            cur_episode_id = self.env.env.current_episode.episode_id
+            scene_name = scnen_path[scnen_path.rfind('/')+1:scnen_path.rfind('.glb')]
+            episode_path = f'{data_path}content/{scene_name}_episodes.json.gz'
+            import gzip 
+            f = gzip.open(episode_path, "rt") 
+
+            dataset_info_path = f'{data_path}val_info.pbz2'
+            deserialized = json.loads(f.read())
+            episode_info = deserialized['episodes'][cur_episode_id]
+            self.goal = episode_info["object_category"]
+
+            self.env.metric_info = {'scene_name': scene_name, 'dataset_info_path': dataset_info_path, 'episode_info': episode_info}
+            
+
+        env_semantic_names = [s.category.name().lower() if s != None else 'Unknown' for s in self.env.env.sim.semantic_annotations().objects]
         env_semantic_names = ['sofa' if x == 'couch' else x for x in env_semantic_names]
         env_semantic_names = ['toilet' if x == 'toilet seat' else x for x in env_semantic_names]
         self.semantic_annotations = env_semantic_names
-        self.goal = self.env.env.current_episode.object_category
+    
         if self.goal == "tv_monitor":
             self.goal = "tv"
         # Set up controller
@@ -74,6 +97,8 @@ class NavigatorHomeRobot(Navigator):
             # Set up flags
         self.controller_active = False
 
+        self.env.reset()
+
         # TODO: Review these variables
         # self.defined_entrance = ['doorway', 'entrance', 'door frame']
 
@@ -83,11 +108,30 @@ class NavigatorHomeRobot(Navigator):
 
         # Reset environment
         self.env.reset() # TODO: Is this needed?
-        env_semantic_names = [s.category.name().lower() for s in self.env.env.sim.semantic_annotations().objects]
+        env_semantic_names = [s.category.name().lower() if s != None else 'Unknown' for s in self.env.env.sim.semantic_annotations().objects]
         env_semantic_names = ['sofa' if x == 'couch' else x for x in env_semantic_names]
         env_semantic_names = ['toilet' if x == 'toilet seat' else x for x in env_semantic_names]
         self.semantic_annotations = env_semantic_names
-        self.goal = self.env.env.current_episode.object_category
+        
+        if 'hm3d' in self.dataset:
+            self.goal = self.env.env.current_episode.object_category
+        elif 'gibson' in self.dataset:
+            self.GT = False
+            data_path = self.config.habitat.dataset.data_path[:self.config.habitat.dataset.data_path.find('val.json.gz')]
+            scnen_path = self.env.env.current_episode.scene_id
+            cur_episode_id = self.env.env.current_episode.episode_id
+            scene_name = scnen_path[scnen_path.rfind('/')+1:scnen_path.rfind('.glb')]
+            episode_path = f'{data_path}content/{scene_name}_episodes.json.gz'
+            import gzip 
+            f = gzip.open(episode_path, "rt") 
+
+            dataset_info_path = f'{data_path}val_info.pbz2'
+            deserialized = json.loads(f.read())
+            episode_info = deserialized['episodes'][cur_episode_id]
+            self.goal = episode_info["object_category"]
+
+            self.env.metric_info = {'scene_name': scene_name, 'dataset_info_path': dataset_info_path, 'episode_info': episode_info}
+          
         if self.goal == "tv_monitor":
             self.goal = "tv"
         # Reset controller
@@ -136,6 +180,7 @@ class NavigatorHomeRobot(Navigator):
         self.action_logging.write(f'[EPISODE ID]: {self.env.env.current_episode.episode_id}\n')
         self.action_logging.write(f'[SCENE ID]: {self.env.env.current_episode.scene_id}\n')
         self.action_logging.write(f'[GOAL]: {self.goal}\n')
+        self.action_logging.write(f'[Ground Truth Sem]: {self.GT}\n')
         self.action_logging.close()
 
         cv2.namedWindow("View")
@@ -145,6 +190,7 @@ class NavigatorHomeRobot(Navigator):
             obs = self._observe()
             self.controller.update(obs)
             images = self.controller.visualise(obs)
+            self.env.update_path_distance()
             cv2.imshow("View", images)
             cv2.waitKey(10)
 
@@ -201,9 +247,7 @@ class NavigatorHomeRobot(Navigator):
         if self.visualisation:
             self.visualise_objects(obs, img_lang_obs)            
     
-        i = 0
         while not self.env.env.episode_over:
-            print(i)
             self.env.act('stop')
 
         for i, obj in enumerate(self.semantic_annotations):
@@ -216,22 +260,22 @@ class NavigatorHomeRobot(Navigator):
         cv2.destroyAllWindows()
 
 if __name__ == "__main__":
-    nav = NavigatorHomeRobot()
-    nav.reset()
+    nav = NavigatorHomeRobot(task_config_path = 'configs/objectnav_gibson_v2_with_semantic.yaml', data_path = "configs/homerobot_gibson_objectnav.yaml")
     test_episode = 3
     test_history = []
+    # str(i) for i in range(test_episode)
     while True:
         scnen_path = nav.env.env.current_episode.scene_id
-        scnen_name = scnen_path[scnen_path.rfind('/')+1:scnen_path.rfind('.basis')]
-        episode = rerun_case[scnen_name]
-        while nav.env.env.current_episode.episode_id not in [str(i) for i in range(test_episode)] or ((nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id ) in test_history):
+        scene_name = scnen_path[scnen_path.rfind('/')+1:scnen_path.rfind('.basis')]
+        # episode = rerun_case[scene_name]
+        while str(nav.env.env.current_episode.episode_id) not in [str(i) for i in range(test_episode)] or ((nav.env.env.current_episode.scene_id + str(nav.env.env.current_episode.episode_id) ) in test_history):
             try:
                 print('RESET', nav.env.env.current_episode.episode_id,nav.env.env.current_episode.scene_id )
                 nav.reset()
             except:
                 sys.exit(0)
-        test_history.append(nav.env.env.current_episode.scene_id + nav.env.env.current_episode.episode_id )
-        try:
-            nav.run()
-        except:
-            print('error')
+        test_history.append(nav.env.env.current_episode.scene_id + str(nav.env.env.current_episode.episode_id) )
+        # try:
+        nav.run()
+        # except:
+            # print('error')

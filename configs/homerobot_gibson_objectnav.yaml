@@ -1,0 +1,5 @@
+sensor_setup: ['left_rgb', 'forward_rgb', 'right_rgb', 'rear_rgb', 'left_depth', 'forward_depth', 'right_depth', 'rear_depth', 'left_semantic', 'forward_semantic', 'right_semantic', 'rear_semantic']
+habitat_data:
+  metadata_path: '/home/zhanxin/foundation_obj_nav/data/objectnav/gibson/v1.1/val/val.json.gz'
+  content_scenes: ["Collierville_episodes", "Corozal_episodes"]
+  scenes_dir: "/home/zhanxin/foundation_obj_nav/data/scene_datasets"

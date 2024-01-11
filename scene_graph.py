@@ -187,7 +187,7 @@ class SceneGraph:
         """
         raise NotImplementedError
 
-    def print_scene_graph(self, selected_node=None, json_flag=True, pretty=False, skip_object=True):
+    def print_scene_graph(self, selected_node=None, json_flag=True, pretty=False, skip_object=True, active_flag = True):
         """
         Prints the scene graph as a dict or JSON string. It represents the scene graph
         using the standard format below, which is also used for loading graphs.
@@ -223,9 +223,10 @@ class SceneGraph:
         else:
             temp_scene_graph =  self.scene_graph.copy()
 
-        for node in self.scene_graph.nodes():
-            if self.scene_graph.nodes()[node]['active'] == False and (node in temp_scene_graph.nodes()):
-                temp_scene_graph.remove_node(node)
+        if active_flag:
+            for node in self.scene_graph.nodes():
+                if self.scene_graph.nodes()[node]['active'] == False and (node in temp_scene_graph.nodes()):
+                    temp_scene_graph.remove_node(node)
 
         # Populate each node_type
         for node_type in self.scene_graph_specs.keys():
