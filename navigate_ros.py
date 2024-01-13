@@ -27,7 +27,7 @@ class NavigatorROS(Navigator):
         )
         with open(node_config_path, 'r') as f:
             self.node_config = yaml.safe_load(f)
-        self.visualise = visualise
+        self.visualisation = visualise
 
         # Data structures and flags
         self.cam_ids = self.node_config['sensors']['camera_ids']
@@ -87,9 +87,9 @@ class NavigatorROS(Navigator):
         """
         Runs the full navigator system
         """
-        rate = rospy.Rate(self.node_config["params"]["navigator_frequency"])
+        # rate = rospy.Rate(self.node_config["params"]["navigator_frequency"])
 
-        if self.visualise:
+        if self.visualisation:
             cv2.namedWindow("Vis")
 
         # This loop gets observations, and runs both "slow" and "fast"
@@ -115,9 +115,38 @@ class NavigatorROS(Navigator):
 
                 # TODO: Low-level perception-reasoning. Run all the time.
 
-            rate.sleep()
+                if self.visualisation:
+                    cv2.imshow("Vis", self.vis_image)
 
-    def run_manual(self):
+            key = cv2.waitKey(50)
+            if key == ord('q'):
+                break
+            # rate.sleep()
+
+    def run_pr(self):
+        """
+        Runs a debug, manual version of the navigator without GNM
+        """
+        active = True
+        cv2.namedWindow("Vis")
+
+        while not rospy.is_shutdown():
+            obs = self._observe()
+            if obs is not None:
+                if not active:
+                    subgoal_image, cam_id = self.loop(obs)
+                    active = True
+
+                if self.visualisation:
+                    cv2.imshow("Vis", self.vis_image)
+
+            key = cv2.waitKey(50)
+            if key == ord('q'):
+                break
+            elif key == ord('s'):
+                active = False
+
+    def run_pc(self):
         """
         Runs a debug, manual version of navigator system without LLM reasoning.
         """
@@ -226,4 +255,4 @@ class NavigatorROS(Navigator):
 
 if __name__ == "__main__":
     node = NavigatorROS()
-    node.run_manual()
+    node.run_pc()

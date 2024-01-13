@@ -11,6 +11,7 @@ import torch
 
 from scene_graph import SceneGraph, default_scene_graph_specs
 from model_interfaces import GPTInterface, VLM_BLIP, VLM_GroundingDino
+from utils.vis_utils import Visualiser
 import json, random
 
 import time
@@ -56,7 +57,6 @@ class Navigator:
         self.action_step = 0
         self.max_episode_step = 500
         self.llm_loop_iter = 0
-        self.visualisation = True
         self.is_navigating = False
         self.success_flag = False
         self.GT = False
@@ -74,6 +74,10 @@ class Navigator:
         # TODO: Review these variables and parameters.
         self.defined_entrance = ['door', 'doorway', 'doorframe', 'window']
 
+        # Visualisation
+        self.visualisation = True
+        self.visualiser = Visualiser() if self.visualisation else None
+        self.vis_image = None
 
     def reset(self):
         # Reset scene graph
@@ -776,7 +780,7 @@ class Navigator:
                     ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
                 ax.text(min_x, min_y, label)
             plt.savefig(self.trial_folder + '/'  +  time.strftime("%Y%m%d%H%M%S") + "_" + direction + ".png")
-            plt.clf()
+            plt.clf()            
 
     def check_current_obs(self, obs, img_lang_obs):
         for direction in ['forward', 'left', 'right', 'rear']:
@@ -845,9 +849,6 @@ class Navigator:
         print('------------  Receive Lang Obs   -------------')
         img_lang_obs = self.perceive(obs)
 
-        if self.visualisation:
-            self.visualise_objects(obs, img_lang_obs)
-
         find_goal_flag, potenrial_next_pos, potenrial_cam_uuid = self.check_current_obs(obs, img_lang_obs)
         if find_goal_flag:
             return potenrial_next_pos, potenrial_cam_uuid
@@ -867,22 +868,32 @@ class Navigator:
         next_goal, next_position, cam_uuid = self.ground_plan_to_bbox()
         self.action_logging.write(f'Path: {path}, Next Goal: {next_goal}\n')
 
+
         if self.visualisation:
-            min_x, min_y, max_x, max_y = next_position
+            self.vis_image = self.visualiser.visualise_obs(
+                obs, 
+                img_lang_obs, 
+                subgoal=(cam_uuid, next_position)
+            )
+            self.vis_image = self.visualiser.visualise_scene_graph(self.vis_image)
 
-            plt.imshow(obs[cam_uuid[:-5]+'rgb'].squeeze())
-            ax = plt.gca()
-            ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
-            ax.text(min_x, min_y, next_goal)
-            plt.savefig(self.trial_folder + '/'  + time.strftime("%Y%m%d%H%M%S") + "_chosen_rgb_" + str(cam_uuid[:-6]) + ".png")
-            plt.clf()
+            # self.visualise_objects(obs, img_lang_obs)
 
-            plt.imshow(obs[cam_uuid[:-5]+'depth'].squeeze())
-            ax = plt.gca()
-            ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
-            ax.text(min_x, min_y, next_goal)
-            plt.savefig(self.trial_folder + '/'  + time.strftime("%Y%m%d%H%M%S") + "_chosen_depth_" + str(cam_uuid[:-6]) + ".png")
-            plt.clf()
+            # min_x, min_y, max_x, max_y = next_position
+
+            # plt.imshow(obs[cam_uuid[:-5]+'rgb'].squeeze())
+            # ax = plt.gca()
+            # ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
+            # ax.text(min_x, min_y, next_goal)
+            # plt.savefig(self.trial_folder + '/'  + time.strftime("%Y%m%d%H%M%S") + "_chosen_rgb_" + str(cam_uuid[:-6]) + ".png")
+            # plt.clf()
+
+            # plt.imshow(obs[cam_uuid[:-5]+'depth'].squeeze())
+            # ax = plt.gca()
+            # ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
+            # ax.text(min_x, min_y, next_goal)
+            # plt.savefig(self.trial_folder + '/'  + time.strftime("%Y%m%d%H%M%S") + "_chosen_depth_" + str(cam_uuid[:-6]) + ".png")
+            # plt.clf()
 
 
         if len(path) > 1:
