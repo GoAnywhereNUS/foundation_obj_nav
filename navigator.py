@@ -187,8 +187,10 @@ class Navigator:
         raise NotImplementedError
 
     def check_goal(self, label):
-        if self.goal == 'sofa':
-            if 'couch' in label:
+        if self.goal == 'sofa' or self.goal == 'couch':
+            if 'couch' in label or 'sofa' in label:
+                return True
+            elif 'armchair' in label:
                 return True
             else:
                 return self.goal in label
@@ -217,8 +219,7 @@ class Navigator:
     def perceive(self, images):
         image_locations = {}
         image_objects = {}
-
-        for view in images.keys():
+        for view in images['sensor_label']:
             label = view.split('_')[0]
             image = images[label + '_rgb']
             image = Image.fromarray(image)
@@ -273,6 +274,10 @@ class Navigator:
                 for i, objlabel in enumerate(objects[1]):
                     if 'glass' in objlabel:
                         remove_id +=  self.get_nearby_bbox(objects[0][i], objects[0], overlap_threshold = 0.7, distance_threshold = 0)
+                    if 'bed' in objlabel and self.llm_loop_iter < 2:
+                        remove_id.append(i)
+                    if self.check_goal(objlabel) and 'floor' in objlabel:
+                        remove_id.append(i)
                 bbox_lst = []
                 objlabel_lst = []
                 cropped_img_lst = []
@@ -717,7 +722,7 @@ class Navigator:
         
         self.action_logging.write(f'[PLAN INFO] Path:{self.path}\n')
         self.action_logging.write(f'[Last Subgoal] Path:{self.last_subgoal}\n')
-
+        
         if len(self.explored_node) > 2:
             if self.scene_graph.is_type(self.last_subgoal, 'object'):
                 all_obj = self.scene_graph.get_related_codes(self.current_state, 'contains', active_flag = False)
@@ -783,16 +788,30 @@ class Navigator:
             plt.clf()            
 
     def check_current_obs(self, obs, img_lang_obs):
+        flag = False
+        next_position = None
+        next_cam_uuid = None
+        next_label = None
+        current_size = 0
         for direction in ['forward', 'left', 'right', 'rear']:
             for i in range(len(img_lang_obs['object'][direction][1])):
                 label = img_lang_obs['object'][direction][1][i]
                 if self.check_goal(label):
-                    next_position = img_lang_obs['object'][direction][0][i].type(torch.int64).tolist()
-                    cam_uuid = direction +'_depth'
-                    self.is_navigating = True
-                    self.last_subgoal = self.goal
-                    return True, next_position, cam_uuid
-        return False, None, None
+                    if flag == False:
+                        next_position = img_lang_obs['object'][direction][0][i].type(torch.int64).tolist()
+                        next_cam_uuid = direction +'_depth'
+                        flag = True
+                        next_label = label
+                        min_x, min_y, max_x, max_y = next_position
+                    elif (max_x-min_x) * (max_y - min_y) > current_size:
+                        current_size = (max_x-min_x) * (max_y - min_y)
+                        next_position = img_lang_obs['object'][direction][0][i].type(torch.int64).tolist()
+                        next_cam_uuid = direction +'_depth'
+                        next_label = label
+        if flag:
+            self.is_navigating = True
+            self.last_subgoal = next_label
+        return flag, next_position, next_cam_uuid
     
     def create_log_folder(log_folder = 'logs'):
         logs_folder = 'logs'
@@ -835,6 +854,22 @@ class Navigator:
         cam_uuid = self.scene_graph.get_node_attr(next_goal)['cam_uuid']+'_depth'
         return next_goal, next_position, cam_uuid
 
+    def visualise_chosen_goal(self, obs, next_position, next_goal, cam_uuid):
+        min_x, min_y, max_x, max_y = next_position
+        plt.imshow(obs[cam_uuid[:-5]+'rgb'].squeeze())
+        ax = plt.gca()
+        ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
+        ax.text(min_x, min_y, next_goal)
+        plt.savefig(self.trial_folder + '/'  + time.strftime("%Y%m%d%H%M%S") + "_chosen_rgb_" + str(cam_uuid[:-6]) + ".png")
+        plt.clf()
+
+        plt.imshow(obs[cam_uuid[:-5]+'depth'].squeeze())
+        ax = plt.gca()
+        ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
+        ax.text(min_x, min_y, next_goal)
+        plt.savefig(self.trial_folder + '/'  + time.strftime("%Y%m%d%H%M%S") + "_chosen_depth_" + str(cam_uuid[:-6]) + ".png")
+        plt.clf()
+
     def loop(self, obs):
         """
         Single iteration of high-level perception-reasoning loop for navigation.
@@ -851,6 +886,9 @@ class Navigator:
 
         find_goal_flag, potenrial_next_pos, potenrial_cam_uuid = self.check_current_obs(obs, img_lang_obs)
         if find_goal_flag:
+            if self.visualisation:
+                self.visualise_chosen_goal(obs, potenrial_next_pos, self.last_subgoal, potenrial_cam_uuid)
+
             return potenrial_next_pos, potenrial_cam_uuid
 
         # Update

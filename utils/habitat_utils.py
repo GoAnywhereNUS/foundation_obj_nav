@@ -337,7 +337,7 @@ class ObjNavEnv:
             starting_distance = planner.fmm_dist[starting_loc] / 20.0 + object_boundary
             spl = min(success * starting_distance / self.path_length, 1)
             print(starting_distance, self.path_length)
-            return {'succrss':success, 'spl':spl, 'distance_to_goal': dist}
+            return {'success':success, 'spl':spl, 'distance_to_goal': dist}
         else:
             return self.env.get_metrics()
     

@@ -121,8 +121,8 @@ class SceneGraph:
         for n in connected_node:
             self.add_edge(n, newnode, "connects to")
         
-        edges_to_remove = list(self.scene_graph.edges(oldnode))
-        self.scene_graph.remove_edges_from(edges_to_remove)
+        # edges_to_remove = list(self.scene_graph.edges(oldnode))
+        # self.scene_graph.remove_edges_from(edges_to_remove)
 
     def get_node_attr(self, node_name):
         return self.scene_graph._node[node_name]
