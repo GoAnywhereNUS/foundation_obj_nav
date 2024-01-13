@@ -75,7 +75,7 @@ class Navigator:
         self.defined_entrance = ['door', 'doorway', 'doorframe', 'window']
 
         # Visualisation
-        self.visualisation = True
+        self.visualisation = False
         self.visualiser = Visualiser() if self.visualisation else None
         self.vis_image = None
 
@@ -219,12 +219,11 @@ class Navigator:
     def perceive(self, images):
         image_locations = {}
         image_objects = {}
-        for view in images['sensor_label']:
-            label = view.split('_')[0]
-            image = images[label + '_rgb']
+        for view in images.keys():
+            image = images[view]
             image = Image.fromarray(image)
             location = self.query_vqa(image, "Which room is the photo?")
-            image_locations[label] = (
+            image_locations[view] = (
                 location.replace(" ", "") #clean space between "living room"
             )
 
@@ -232,7 +231,7 @@ class Navigator:
                 bbox_lst = []
                 objlabel_lst = []
                 cropped_img_lst = []
-                semantic_gt = images[label +'_semantic']
+                semantic_gt = images[view +'_semantic']
                 # Ignore small objects
                 for instance in np.unique(semantic_gt):
                     instance_label = self.semantic_annotations[instance]
@@ -287,7 +286,7 @@ class Navigator:
                         objlabel_lst.append(objlabel)
                         cropped_img_lst.append(objects[2][i])
                 objects = (torch.stack(bbox_lst, 0), objlabel_lst, cropped_img_lst)
-            image_objects[label] = objects
+            image_objects[view] = objects
 
         # TODO: Implement some reasonable fusion across all images
         return {
@@ -324,8 +323,15 @@ class Navigator:
             end_question = f"Please select one object that is most likely located near a {goal}. Please only select one object in the list and use this element name in answer. Use the exact name in the list. Always follow the format: Answer: <your answer>."
             whole_query = start_question + discript + end_question
         elif query_type == 'state_estimation':
-            discript1 = "Depiction1: On the left, there is " + ", ".join(discript[0]['left']) + ". On the right, there is " + ", ".join(discript[0]['right']) + ". In front of me, there is " + ", ".join(discript[0]['forward']) + ". Behind me, there is " + ", ".join(discript[0]['rear']) + '\n'
-            discript2 = "Depiction2: On the left, there is " + ", ".join(discript[1]['left']) + ". On the right, there is " + ", ".join(discript[1]['right']) + ".In front of me, there is " + ", ".join(discript[1]['forward']) + ". Behind me, there is " + ", ".join(discript[1]['rear']) + '\n'
+            discript1 = "Depiction1: "
+            discript2 = "Depiction2: "
+            for direction in discript[0].keys():
+                temp_discript1 = ", ".join(discript[0][direction])
+                discript1 +=  f"On the {direction}, there is {temp_discript1}."
+                temp_discript2 = ", ".join(discript[1][direction])
+                discript1 +=  f"On the {direction}, there is {temp_discript2}."
+            discript1 += '\n'
+            discript2 += '\n'
             question = "These are depictions of what I observe from two different vantage points. Please tell me if these two viewpoints correspond to the same room. It's important to note that the descriptions may originate from two positions within the room, each with a distinct angle. Therefore, the descriptions may pertain to the same room but not necessarily capture the same elements. Please be aware that my viewing angle varies, so it is not necessary for the elements to align in the same direction. As long as the relative positions between objects are accurate, it is considered acceptable. Please assess the arrangement of objects and identifiable features in the descriptions to determine whether these two positions are indeed in the same place. Provide a response of True or False, along with supporting reasons."
             whole_query = discript1 + discript2 + question
         elif query_type == 'node_feature':
@@ -361,13 +367,18 @@ class Navigator:
         est_state = None
 
         obj_label_descript = self.query_detailed_descript(obs['cleaned_object'], obs['cleaned_object_cropped_img'])
-        room_descript = {'left':[], 'right':[], 'forward':[], 'rear':[]}
+        room_descript = {}
+        locations = []
+        for direction in obs['location'].keys():
+            room_descript[direction] = []
+            locations += [obs['location'][direction]]
         for i, label in enumerate(obj_label_descript):
             room_descript[obs['cleand_sensor_dir'][i]].append(label)
 
         # TODO: add weight on differentt direction based on object num in each direction
-        obs_location = most_common([obs['location']['forward'], obs['location']['left'], obs['location']['right'], obs['location']['rear']])
-        
+            
+        obs_location = most_common(locations)
+
         room_lst_scene_graph = self.scene_graph.get_secific_type_nodes('room')
         all_room = [room[:room.index('_')] for room in room_lst_scene_graph]
         # if current room is already in scene graph
@@ -411,12 +422,26 @@ class Navigator:
 
         # TODO: Need panaromic view to estimate state
         
-        # Deal with multiple rgn sensors
-        obj_label = obs['object']['forward'][1] + obs['object']['left'][1] + obs['object']['right'][1] + obs['object']['rear'][1]
-        obj_bbox = torch.cat((obs['object']['forward'][0], obs['object']['left'][0], obs['object']['right'][0], obs['object']['rear'][0]), dim=0)
-        cropped_imgs = obs['object']['forward'][2] + obs['object']['left'][2] + obs['object']['right'][2] + obs['object']['rear'][2]
-        obs_location = most_common([obs['location']['forward'], obs['location']['left'], obs['location']['right'], obs['location']['rear']])
-        idx_sensordirection = ['forward' for i in range(len(obs['object']['forward'][1]))] + ['left' for i in range(len(obs['object']['left'][1]))] + ['right' for i in range(len(obs['object']['right'][1]))] + ['rear' for i in range(len(obs['object']['rear'][1]))] 
+        obj_label = []
+        cropped_imgs = []
+        locations = []
+        obj_bbox = []
+        idx_sensordirection = []
+        for direction in obs['object'].keys():
+            obj_label += obs['object'][direction][1]
+            idx_sensordirection += [direction for i in range(len(obs['object'][direction][1]))]
+            cropped_imgs +=  obs['object'][direction][2]
+            locations += [obs['location'][direction]]
+            obj_bbox += [obs['object'][direction][0]]
+
+        obs_location = most_common(locations)
+        obj_bbox = torch.cat(obj_bbox, dim = 0)
+
+        #obj_label = obs['object']['forward'][1] + obs['object']['left'][1] + obs['object']['right'][1] + obs['object']['rear'][1]
+        #obj_bbox = torch.cat((obs['object']['forward'][0], obs['object']['left'][0], obs['object']['right'][0], obs['object']['rear'][0]), dim=0)
+        #cropped_imgs = obs['object']['forward'][2] + obs['object']['left'][2] + obs['object']['right'][2] + obs['object']['rear'][2]
+        #obs_location = most_common([obs['location']['forward'], obs['location']['left'], obs['location']['right'], obs['location']['rear']])
+        #idx_sensordirection = ['forward' for i in range(len(obs['object']['forward'][1]))] + ['left' for i in range(len(obs['object']['left'][1]))] + ['right' for i in range(len(obs['object']['right'][1]))] + ['rear' for i in range(len(obs['object']['rear'][1]))] 
         # Add bbox index into obj label
         obj_label = [f'{item}_{index}' for index, item in enumerate(obj_label)]
         obs_obj_discript = "["+ ", ".join(obj_label) + "]"
@@ -556,25 +581,25 @@ class Navigator:
                 
                 if self.current_state[:-2] == entrance_name: # handle wrong entrance name, (To be deleted).
                     continue
-                try:
-                    sensor_dir = idx_sensordirection[bb_idx] # get the sensor direction for this entrance
-                    if 'LAST' in item:
-                        temp_entrance = self.last_subgoal
-                        self.scene_graph.nodes()[temp_entrance]['image'] = cropped_imgs[bb_idx]
-                        self.scene_graph.nodes()[temp_entrance]['bbox'] = obj_bbox[bb_idx]
-                        self.scene_graph.nodes()[temp_entrance]['cam_uuid'] = sensor_dir
-                        self.scene_graph.nodes()[temp_entrance]['active'] = True
-                    else:
-                        temp_entrance = self.scene_graph.add_node("entrance", entrance_name, {"active": True,"image": cropped_imgs[bb_idx],"bbox": obj_bbox[bb_idx],"cam_uuid": sensor_dir})
-                    self.scene_graph.add_edge(self.current_state, temp_entrance, "connects to")
-                    bbox_in_specific_dir = np.where(np.array(idx_sensordirection) == sensor_dir)[0] # get all objects in the direction
-                    nearby_bbox_idx = self.get_nearby_bbox(obj_bbox[bb_idx],obj_bbox[bbox_in_specific_dir,])
-                    for idx in nearby_bbox_idx:
-                        if idx in bbox_idx_to_obj_name.keys():
-                            new_obj = bbox_idx_to_obj_name[idx] 
-                            self.scene_graph.add_edge(temp_entrance, new_obj, "is near")
-                except:
-                    print('ERROR')
+                # try:
+                sensor_dir = idx_sensordirection[bb_idx] # get the sensor direction for this entrance
+                if 'LAST' in item:
+                    temp_entrance = self.last_subgoal
+                    self.scene_graph.nodes()[temp_entrance]['image'] = cropped_imgs[bb_idx]
+                    self.scene_graph.nodes()[temp_entrance]['bbox'] = obj_bbox[bb_idx]
+                    self.scene_graph.nodes()[temp_entrance]['cam_uuid'] = sensor_dir
+                    self.scene_graph.nodes()[temp_entrance]['active'] = True
+                else:
+                    temp_entrance = self.scene_graph.add_node("entrance", entrance_name, {"active": True,"image": cropped_imgs[bb_idx],"bbox": obj_bbox[bb_idx],"cam_uuid": sensor_dir})
+                self.scene_graph.add_edge(self.current_state, temp_entrance, "connects to")
+                bbox_in_specific_dir = np.where(np.array(idx_sensordirection) == sensor_dir)[0] # get all objects in the direction
+                nearby_bbox_idx = self.get_nearby_bbox(obj_bbox[bb_idx],obj_bbox[bbox_in_specific_dir,])
+                for idx in nearby_bbox_idx:
+                    if idx in bbox_idx_to_obj_name.keys():
+                        new_obj = bbox_idx_to_obj_name[idx] 
+                        self.scene_graph.add_edge(temp_entrance, new_obj, "is near")
+                # except:
+                #     print('ERROR')
 
         # Only when we are still in the same node, we need to update the features of doors.
         if len(to_be_updated_nodes) > 0:
@@ -769,10 +794,11 @@ class Navigator:
         obj_lst = img_lang_obs['object']
     
         print(f'Location: {location}\nObjecet: {obj_lst}')
-        obj_label_tmp = ['forward'] + img_lang_obs['object']['forward'][1] + ['left'] + img_lang_obs['object']['left'][1] + ['right'] + img_lang_obs['object']['right'][1] + ['rear'] + img_lang_obs['object']['rear'][1]
-        self.action_logging.write(f'[Obs]: Location: {location}\nObjecet: {obj_label_tmp}\n')
+
+        # obj_label_tmp = ['forward'] + img_lang_obs['object']['forward'][1] + ['left'] + img_lang_obs['object']['left'][1] + ['right'] + img_lang_obs['object']['right'][1] + ['rear'] + img_lang_obs['object']['rear'][1]
+        # self.action_logging.write(f'[Obs]: Location: {location}\nObjecet: {obj_label_tmp}\n')
                 
-        for direction in ['forward', 'left', 'right', 'rear']:
+        for direction in obs.keys():
             obs_rgb = obs[direction + '_rgb']
             plt.imshow(obs_rgb.squeeze())
             ax = plt.gca()
@@ -793,7 +819,7 @@ class Navigator:
         next_cam_uuid = None
         next_label = None
         current_size = 0
-        for direction in ['forward', 'left', 'right', 'rear']:
+        for direction in obs.keys():
             for i in range(len(img_lang_obs['object'][direction][1])):
                 label = img_lang_obs['object'][direction][1][i]
                 if self.check_goal(label):
@@ -908,31 +934,15 @@ class Navigator:
 
 
         if self.visualisation:
-            self.vis_image = self.visualiser.visualise_obs(
-                obs, 
-                img_lang_obs, 
-                subgoal=(cam_uuid, next_position)
-            )
-            self.vis_image = self.visualiser.visualise_scene_graph(self.vis_image)
+            # self.vis_image = self.visualiser.visualise_obs(
+            #     obs, 
+            #     img_lang_obs, 
+            #     subgoal=(cam_uuid, next_position)
+            # )
+            # self.vis_image = self.visualiser.visualise_scene_graph(None, self.scene_graph)
 
-            # self.visualise_objects(obs, img_lang_obs)
-
-            # min_x, min_y, max_x, max_y = next_position
-
-            # plt.imshow(obs[cam_uuid[:-5]+'rgb'].squeeze())
-            # ax = plt.gca()
-            # ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
-            # ax.text(min_x, min_y, next_goal)
-            # plt.savefig(self.trial_folder + '/'  + time.strftime("%Y%m%d%H%M%S") + "_chosen_rgb_" + str(cam_uuid[:-6]) + ".png")
-            # plt.clf()
-
-            # plt.imshow(obs[cam_uuid[:-5]+'depth'].squeeze())
-            # ax = plt.gca()
-            # ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
-            # ax.text(min_x, min_y, next_goal)
-            # plt.savefig(self.trial_folder + '/'  + time.strftime("%Y%m%d%H%M%S") + "_chosen_depth_" + str(cam_uuid[:-6]) + ".png")
-            # plt.clf()
-
+            self.visualise_objects(obs, img_lang_obs)
+            self.visualise_chosen_goal(obs, next_position, next_goal, cam_uuid)
 
         if len(path) > 1:
             next_goal = path[1]
