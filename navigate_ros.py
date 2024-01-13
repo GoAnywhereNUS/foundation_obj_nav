@@ -8,8 +8,12 @@ import sensor_msgs
 from utils.ros_utils import msg_to_pil, pil_to_msg
 
 from navigator import *
-import cv2
 from gnm_controller import GNMController
+import cv2
+
+#for k, v in os.environ.items():
+#    if k.startswith("QT_") and "cv2" in v:
+#        del os.environ[k]
 
 
 class NavigatorROS(Navigator):
@@ -19,15 +23,18 @@ class NavigatorROS(Navigator):
         llm_config_path="configs/gpt_config.yaml",
         node_config_path="configs/ros_node_config.yaml",
         visualise=True,
+        run_debug=None, # None, "pr" or "pc"
     ):
         
         super().__init__(
             scene_graph_specs=scene_graph_specs, 
-            llm_config_path=llm_config_path
+            llm_config_path=llm_config_path,
+            visualise=visualise
         )
         with open(node_config_path, 'r') as f:
             self.node_config = yaml.safe_load(f)
-        self.visualisation = visualise
+        self.run_debug = run_debug
+        self.visualiser.set_live_stream_id('mid')
 
         # Data structures and flags
         self.cam_ids = self.node_config['sensors']['camera_ids']
@@ -38,22 +45,36 @@ class NavigatorROS(Navigator):
 
         # Initialise ROS node and GNM controller
         rospy.init_node('navigator', anonymous=True)
-        self._controller = GNMController(
-            maintain_aspect=True
-        )
+        self._controller = None
+        if self.run_debug is None or self.run_debug == "pc":
+            self._controller = GNMController(
+                maintain_aspect=True
+            )
 
         # Subscribers
-        self.cam_subs = [
-            rospy.Subscriber(
-                '/rs_' + cam_id + '/color/image_raw',
+        #self.cam_subs = [
+        #    rospy.Subscriber(
+        #        '/rs_' + cam_id + '/color/image_raw',
+        #        sensor_msgs.msg.Image,
+        #        lambda msg: self.image_buffer[cam_id].append(msg)
+        #    ) for cam_id in self.cam_ids
+        #]
+
+        self.mid_sub = rospy.Subscriber(
+                '/rs_mid/color/image_raw',
                 sensor_msgs.msg.Image,
-                lambda msg: self._image_callback(cam_id, msg)
-            ) for cam_id in self.cam_ids
-        ]
+                lambda msg: self.image_buffer['mid'].append(msg)
+        )
+        self.rear_sub = rospy.Subscriber(
+                '/rs_rear/color/image_raw',
+                sensor_msgs.msg.Image,
+                lambda msg: self.image_buffer['rear'].append(msg)
+        )
 
         # TODO: Services
 
     def _image_callback(self, cam_id, image_msg):
+        print("Received:", cam_id)
         self.image_buffer[cam_id].append(image_msg)
 
     def reset(self):
@@ -73,9 +94,10 @@ class NavigatorROS(Navigator):
         obs = None
         if any([len(buf) == 0 for buf in self.image_buffer.values()]):
             rospy.logwarn('No images in buffer for at least one sensor!')
+            print({k:len(v) for k, v in self.image_buffer.items()})
         else:
             obs = { 
-                cam_id + '_rgb' : np.array(msg_to_pil(buf[-1]))
+                cam_id : np.array(msg_to_pil(buf[-1]))
                 for cam_id, buf in self.image_buffer.items() 
             }
         return obs
@@ -87,6 +109,19 @@ class NavigatorROS(Navigator):
         """
         Runs the full navigator system
         """
+        #while not rospy.is_shutdown():
+        #    print({k:len(v) for k, v in self.image_buffer.items()})
+        #    import time
+        #    time.sleep(0.2)
+        #return
+
+        if self.run_debug is not None:
+            if self.run_debug == "pr":
+                self.run_pr()
+            elif self.run_debug == "pc":
+                self.run_pc()
+            return
+
         # rate = rospy.Rate(self.node_config["params"]["navigator_frequency"])
 
         if self.visualisation:
@@ -127,7 +162,7 @@ class NavigatorROS(Navigator):
         """
         Runs a debug, manual version of the navigator without GNM
         """
-        active = True
+        active = False
         cv2.namedWindow("Vis")
 
         while not rospy.is_shutdown():
@@ -138,8 +173,9 @@ class NavigatorROS(Navigator):
                     active = True
 
                 if self.visualisation:
-                    cv2.imshow("Vis", self.vis_image)
-
+                    self.vis_image = self.visualiser.visualise_live(self.vis_image, obs)
+                    
+            cv2.imshow("Vis", self.vis_image)
             key = cv2.waitKey(50)
             if key == ord('q'):
                 break
@@ -254,5 +290,6 @@ class NavigatorROS(Navigator):
                             return
 
 if __name__ == "__main__":
-    node = NavigatorROS()
-    node.run_pc()
+    node = NavigatorROS(run_debug="pr")
+    node.goal = "armchair"
+    node.run()

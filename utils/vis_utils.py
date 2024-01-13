@@ -24,6 +24,10 @@ class Visualiser:
         ]
         self.curr_layout = None
         self.num_views = None
+        self.live_stream_id = None
+
+    def set_live_stream_id(self, live_stream_id):
+        self.live_stream_id = live_stream_id
 
     def visualise_obs(self, obs, img_lang_obs, subgoal=None):
         locations = img_lang_obs['location']
@@ -52,7 +56,7 @@ class Visualiser:
             view_location = locations[cam_id]
 
             cv2.putText(
-                rgb, view_location, (10, 10),
+                rgb, view_location, (20, 20),
                 font, font_scale, font_colour, font_thickness, cv2.LINE_AA,
             )
 
@@ -63,7 +67,7 @@ class Visualiser:
                     (int(x0), int(y0)), 
                     (int(x1), int(y1)), 
                     color=(0,0,0), 
-                    thickness=1
+                    thickness=3
                 )
                 cv2.putText(
                     rgb,
@@ -75,14 +79,14 @@ class Visualiser:
                     thickness=2
                 )
 
-            if subgoal is not None and subgoal[0] == cam_id:
+            if subgoal is not None and cam_id in subgoal[0]:
                 _, (min_x, min_y, max_x, max_y) = subgoal
                 cv2.rectangle(
                     rgb,
                     (int(min_x), int(min_y)),
                     (int(max_x), int(max_y)),
                     color=(20, 20, 255),
-                    thickness=3
+                    thickness=6
                 )
 
             images.append((cam_id, rgb))
@@ -99,30 +103,41 @@ class Visualiser:
             )).astype(np.uint8) * 255
 
             # Laying out processed observations
-            for i in range(iters):
+            for i in range(min(iters, len(images))):
                 cam_id, im = images[i]
                 image_dims = im.shape
                 width, start_row, start_col = self.curr_layout['processed' + str(i)]
                 height = int(width / (image_dims[1] / image_dims[0]))
                 vis_image[
                     start_row : start_row+height,
-                    start_col : start_col+width
-                ] = cv2.resize(im[0], (height, width))
+                    start_col : start_col+width,
+                ] = cv2.resize(im, (width, height))
                 cv2.putText(
-                    vis_image, cam_id, (start_row-20, start_col+(image_dims[1] // 2)),
+                    vis_image, cam_id, (start_col+(width // 2), start_row-20),
                     font, font_scale, font_colour, font_thickness, cv2.LINE_AA,
                 )
 
+        return vis_image
+    
+    def visualise_live(self, vis_image, obs):
+        if len(obs) > 0:
+            if self.live_stream_id is None:
+                im = obs[list(obs.keys()[0])]
+            else:
+                im = obs[self.live_stream_id]
+
             # Laying out live stream
+            image_dims = im.shape
             width, start_row, start_col = self.curr_layout['live']
             height = int(width / (image_dims[1] / image_dims[0]))
             vis_image[
                 start_row : start_row+height,
                 start_col : start_col+width
-            ] = cv2.resize(obs[obs.keys()[0]], (height, width))
+            ] = cv2.resize(im, (width, height))
 
         return vis_image
-    
+
 
     def visualise_scene_graph(self, vis_image, scene_graph):
         # TODO: Lay out scene graph onto the vis_image
+        return vis_image

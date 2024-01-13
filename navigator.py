@@ -27,7 +27,8 @@ class Navigator:
     def __init__(
         self,
         scene_graph_specs=default_scene_graph_specs,
-        llm_config_path="configs/gpt_config.yaml"
+        llm_config_path="configs/gpt_config.yaml",
+        visualise=False,
     ):
         # Set up foundation models for perception and reasoning
         self.llm = GPTInterface(config_path=llm_config_path)
@@ -75,9 +76,9 @@ class Navigator:
         self.defined_entrance = ['door', 'doorway', 'doorframe', 'window']
 
         # Visualisation
-        self.visualisation = False
+        self.visualisation = visualise 
         self.visualiser = Visualiser() if self.visualisation else None
-        self.vis_image = None
+        self.vis_image = np.ones((100, 100, 3))
 
     def reset(self):
         # Reset scene graph
@@ -257,14 +258,14 @@ class Navigator:
                 modified_entrance = []
                 if (self.query_vqa(image, "Is there a door in the photo?") == 'yes'):
                     modified_entrance += self.defined_entrance
-                if (
-                    self.goal is not None 
-                    and (self.query_vqa(
-                            image, f"Is there a {self.goal} in the photo?"
-                        ) == 'yes'
-                    )
-                ):
-                    modified_entrance += [self.goal]
+               # if (
+               #     self.goal is not None 
+               #     and (self.query_vqa(
+               #             image, f"Is there a {self.goal} in the photo?"
+               #         ) == 'yes'
+               #     )
+               # ):
+               #     modified_entrance += [self.goal]
                 if len(modified_entrance) > 0 :
                     objects = self.query_objects(image,  modified_entrance)
                 else:
@@ -910,12 +911,17 @@ class Navigator:
         print('------------  Receive Lang Obs   -------------')
         img_lang_obs = self.perceive(obs)
 
-        find_goal_flag, potenrial_next_pos, potenrial_cam_uuid = self.check_current_obs(obs, img_lang_obs)
+        find_goal_flag, potential_next_pos, potential_cam_uuid = self.check_current_obs(obs, img_lang_obs)
         if find_goal_flag:
             if self.visualisation:
-                self.visualise_chosen_goal(obs, potenrial_next_pos, self.last_subgoal, potenrial_cam_uuid)
+            #    self.visualise_chosen_goal(obs, potenrial_next_pos, self.last_subgoal, potenrial_cam_uuid)
+                self.vis_image = self.visualiser.visualise_obs(
+                    obs,
+                    img_lang_obs,
+                    subgoal=(potential_cam_uuid, potential_next_pos)
+                )
 
-            return potenrial_next_pos, potenrial_cam_uuid
+            return potential_next_pos, potential_cam_uuid
 
         # Update
         self.update_scene_graph(img_lang_obs)
@@ -934,15 +940,18 @@ class Navigator:
 
 
         if self.visualisation:
-            # self.vis_image = self.visualiser.visualise_obs(
-            #     obs, 
-            #     img_lang_obs, 
-            #     subgoal=(cam_uuid, next_position)
-            # )
-            # self.vis_image = self.visualiser.visualise_scene_graph(None, self.scene_graph)
+            print('Visualising processed', cam_uuid, next_position)
+            self.vis_image = self.visualiser.visualise_obs(
+                obs, 
+                img_lang_obs, 
+                subgoal=(cam_uuid, next_position)
+            )
+            print('Visualising scene graph')
+            self.vis_image = self.visualiser.visualise_scene_graph(self.vis_image, self.scene_graph)
+            print('Returning')
 
-            self.visualise_objects(obs, img_lang_obs)
-            self.visualise_chosen_goal(obs, next_position, next_goal, cam_uuid)
+            #self.visualise_objects(obs, img_lang_obs)
+            #self.visualise_chosen_goal(obs, next_position, next_goal, cam_uuid)
 
         if len(path) > 1:
             next_goal = path[1]
