@@ -62,6 +62,7 @@ class Navigator:
         self.success_flag = False
         self.GT = False
         self.semantic_annotations = None
+        self.goal_synonyms = None
 
         self.trial_folder = self.create_log_folder()
         self.action_log_path = os.path.join(self.trial_folder, 'action.txt')
@@ -95,6 +96,7 @@ class Navigator:
         self.llm_loop_iter = 0
         self.is_navigating = False
         self.success_flag = False
+        self.goal_synonyms = None
 
         # Reset logging
         self.trial_folder = self.create_log_folder()
@@ -188,34 +190,54 @@ class Navigator:
         raise NotImplementedError
 
     def check_goal(self, label):
-        if self.goal == 'sofa' or self.goal == 'couch':
-            if 'couch' in label or 'sofa' in label:
+        if self.goal_synonyms == None:
+            for i in range(self.llm_max_query):
+                if self.goal_synonyms == None:
+                    goal_candidate = self.llm.check_goal(self.goal)
+                    try:
+                        goal_candidate_lst = json.loads(goal_candidate)
+                        if isinstance(goal_candidate_lst, list) and self.goal in goal_candidate_lst:
+                            self.goal_synonyms = [i.lower() for i in goal_candidate_lst]
+                            break
+                    except:
+                        print('ERROR: No valid goal')
+        if self.goal_synonyms == None:
+            self.goal_synonyms = [self.goal]
+        
+        for i in self.goal_synonyms:
+            if i in label:
                 return True
-            elif 'armchair' in label:
-                return True
-            else:
-                return self.goal in label
-        if self.goal == 'bed':
-            return self.goal == label
-        if self.goal == 'toilet':
-            if 'toilet' in label and 'seat' in label:
-                return True
-            elif 'toilet' in label and 'bowl' in label:
-                return True
-            else:
-                return self.goal == label
-        if self.goal == 'plant':
-            if label == 'ornamental plant':
-                return False
-            else:
-                return self.goal in label
-        if self.goal == 'tv':
-            if 'television' in label:
-                return True
-            else:
-                return self.goal in label
-        else:
-            return self.goal in label
+        return False 
+
+
+        # if self.goal == 'sofa' or self.goal == 'couch':
+        #     if 'couch' in label or 'sofa' in label:
+        #         return True
+        #     elif 'armchair' in label:
+        #         return True
+        #     else:
+        #         return self.goal in label
+        # if self.goal == 'bed':
+        #     return self.goal == label
+        # if self.goal == 'toilet':
+        #     if 'toilet' in label and 'seat' in label:
+        #         return True
+        #     elif 'toilet' in label and 'bowl' in label:
+        #         return True
+        #     else:
+        #         return self.goal == label
+        # if self.goal == 'plant':
+        #     if label == 'ornamental plant':
+        #         return False
+        #     else:
+        #         return self.goal in label
+        # if self.goal == 'tv':
+        #     if 'television' in label:
+        #         return True
+        #     else:
+        #         return self.goal in label
+        # else:
+        #     return self.goal in label
 
     def perceive(self, images):
         image_locations = {}
@@ -260,14 +282,14 @@ class Navigator:
                 modified_entrance = []
                 if (self.query_vqa(image, "Is there a door in the photo?") == 'yes'):
                     modified_entrance += self.defined_entrance
-               # if (
-               #     self.goal is not None 
-               #     and (self.query_vqa(
-               #             image, f"Is there a {self.goal} in the photo?"
-               #         ) == 'yes'
-               #     )
-               # ):
-               #     modified_entrance += [self.goal]
+                # if (
+                #     self.goal is not None 
+                #     and (self.query_vqa(
+                #             image, f"Is there a {self.goal} in the photo?"
+                #         ) == 'yes'
+                #     )
+                # ):
+                #    modified_entrance += [self.goal]
                 if len(modified_entrance) > 0 :
                     objects = self.query_objects(image,  modified_entrance)
                 else:
@@ -299,7 +321,9 @@ class Navigator:
 
     def perceive_location(self, images):
         image_locations = {}
-        for label in ['left_rgb', 'forward_rgb', 'right_rgb', 'rear_rgb']:
+        for label in images.keys():
+            if label == 'info':
+                continue
             image = images[label]
             image = Image.fromarray(image)
             location = self.query_vqa(image, "Which room is the photo?")
@@ -348,6 +372,10 @@ class Navigator:
                 discript2 += f" {name} that is near " + ", ".join(candidate_entrances_feature[i]) +". "
             question = "Please select one object that is most likely to be the object I want to find. Please only select one object and use this element name in answer. Use the exact name in the given sentences. Always follow the format: Answer: <your answer>."
             whole_query = discript1 + discript2 + question
+        elif query_type == 'check_goal':
+            start_question = "There is a list:"
+            end_question = f"Please check whether {goal} is in the list. Please reply the object with its index. Always follow the format: Answer: <your answer>."
+            whole_query = start_question + discript + end_question
         return whole_query
 
     def estimate_state(self, img_lang_obs):
@@ -390,8 +418,6 @@ class Navigator:
             for i in indices:
                 similar_room = room_lst_scene_graph[i]
                 similar_room_description = self.scene_graph.get_node_attr(similar_room)['description']
-                similar_room_obj = self.scene_graph.get_related_codes(similar_room, 'contains')
-                similar_room_obj_descript = self.query_detailed_descript(similar_room_obj)
 
                 store_ans = []
                 for i in range(self.llm_max_query):
@@ -947,12 +973,12 @@ class Navigator:
         find_goal_flag, potential_next_pos, potential_cam_uuid = self.check_current_obs(obs, img_lang_obs)
         if find_goal_flag:
             if self.visualisation:
-            #    self.visualise_chosen_goal(obs, potenrial_next_pos, self.last_subgoal, potenrial_cam_uuid)
-                self.vis_image = self.visualiser.visualise_obs(
-                    obs,
-                    img_lang_obs,
-                    subgoal=(potential_cam_uuid, potential_next_pos)
-                )
+               self.visualise_chosen_goal(obs, potential_next_pos, self.last_subgoal, potential_cam_uuid)
+                # self.vis_image = self.visualiser.visualise_obs(
+                #     obs,
+                #     img_lang_obs,
+                #     subgoal=(potential_cam_uuid, potential_next_pos)
+                # )
 
             return potential_next_pos, potential_cam_uuid
 
@@ -973,18 +999,18 @@ class Navigator:
 
 
         if self.visualisation:
-            print('Visualising processed', cam_uuid, next_position)
-            self.vis_image = self.visualiser.visualise_obs(
-                obs, 
-                img_lang_obs, 
-                subgoal=(cam_uuid, next_position)
-            )
-            print('Visualising scene graph')
-            self.vis_image = self.visualiser.visualise_scene_graph(self.vis_image, self.scene_graph)
-            print('Returning')
+            # print('Visualising processed', cam_uuid, next_position)
+            # self.vis_image = self.visualiser.visualise_obs(
+            #     obs, 
+            #     img_lang_obs, 
+            #     subgoal=(cam_uuid, next_position)
+            # )
+            # print('Visualising scene graph')
+            # self.vis_image = self.visualiser.visualise_scene_graph(self.vis_image, self.scene_graph)
+            # print('Returning')
 
-            #self.visualise_objects(obs, img_lang_obs)
-            #self.visualise_chosen_goal(obs, next_position, next_goal, cam_uuid)
+            self.visualise_objects(obs, img_lang_obs)
+            self.visualise_chosen_goal(obs, next_position, next_goal, cam_uuid)
 
         if len(path) > 1:
             next_goal = path[1]

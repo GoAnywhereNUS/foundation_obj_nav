@@ -38,7 +38,8 @@ class NavigatorHomeRobot(Navigator):
         
         super().__init__(
             scene_graph_specs=scene_graph_specs, 
-            llm_config_path=llm_config_path
+            llm_config_path=llm_config_path,
+            visualise=True
         )
 
         self.GT = True
@@ -260,7 +261,6 @@ class NavigatorHomeRobot(Navigator):
         self.action_logging = open(self.action_log_path, 'a')
         preprocessed_obs = {'forward': obs['forward_rgb'], 'right': obs['right_rgb'], 'left': obs['left_rgb'], 'rear': obs['rear_rgb'], 'info':{'forward_depth':obs['forward_depth'], 'left_depth':obs['left_depth'], 'right_depth':obs['right_depth'], 'rear_depth':obs['rear_depth'],'forward_semantic':obs['forward_semantic'], 'left_semantic':obs['left_semantic'], 'right_semantic':obs['right_semantic'], 'rear_semantic':obs['rear_semantic'] } } 
         img_lang_obs = self.perceive(preprocessed_obs)
-        breakpoint()
         if self.visualisation:
             self.visualise_objects(preprocessed_obs, img_lang_obs)            
     
@@ -271,8 +271,9 @@ class NavigatorHomeRobot(Navigator):
             if self.check_goal(obj):
                 self.action_logging.write(f"[Goal Check]: id :{i}; obj: {obj}, pos:{self.env.env.sim.semantic_annotations().objects[i].aabb.center} \n")
 
-        print(nav.env.get_episode_metrics())
-        self.action_logging.write(f"[Metrics]: {nav.env.get_episode_metrics()}\n")
+        print(self.env.get_episode_metrics())
+        self.action_logging.write(f"[Goal Synonyms]: {self.goal_synonyms}\n")
+        self.action_logging.write(f"[Metrics]: {self.env.get_episode_metrics()}\n")
         self.action_logging.close()
         cv2.destroyAllWindows()
 
@@ -285,7 +286,7 @@ if __name__ == "__main__":
         scnen_path = nav.env.env.current_episode.scene_id
         scene_name = scnen_path[scnen_path.rfind('/')+1:scnen_path.rfind('.basis')]
         # episode = rerun_case[scene_name]
-        while str(nav.env.env.current_episode.episode_id) not in ['4'] or ((nav.env.env.current_episode.scene_id + str(nav.env.env.current_episode.episode_id) ) in test_history):
+        while str(nav.env.env.current_episode.episode_id) not in ['3'] or ((nav.env.env.current_episode.scene_id + str(nav.env.env.current_episode.episode_id) ) in test_history):
             try:
                 print('RESET', nav.env.env.current_episode.episode_id,nav.env.env.current_episode.scene_id )
                 nav.reset()
