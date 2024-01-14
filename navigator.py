@@ -221,6 +221,8 @@ class Navigator:
         image_locations = {}
         image_objects = {}
         for view in images.keys():
+            if view == 'info':
+                continue
             image = images[view]
             image = Image.fromarray(image)
             location = self.query_vqa(image, "Which room is the photo?")
@@ -232,7 +234,7 @@ class Navigator:
                 bbox_lst = []
                 objlabel_lst = []
                 cropped_img_lst = []
-                semantic_gt = images[view +'_semantic']
+                semantic_gt = images['info'][view +'_semantic']
                 # Ignore small objects
                 for instance in np.unique(semantic_gt):
                     instance_label = self.semantic_annotations[instance]
@@ -348,7 +350,7 @@ class Navigator:
             whole_query = discript1 + discript2 + question
         return whole_query
 
-    def estimate_state(self, obs):
+    def estimate_state(self, img_lang_obs):
         """
         Queries the LLM with the observations and scene graph to
         get our current state.
@@ -367,14 +369,14 @@ class Navigator:
         
         est_state = None
 
-        obj_label_descript = self.query_detailed_descript(obs['cleaned_object'], obs['cleaned_object_cropped_img'])
+        obj_label_descript = self.query_detailed_descript(img_lang_obs['cleaned_object'], img_lang_obs['cleaned_object_cropped_img'])
         room_descript = {}
         locations = []
-        for direction in obs['location'].keys():
+        for direction in img_lang_obs['location'].keys():
             room_descript[direction] = []
-            locations += [obs['location'][direction]]
+            locations += [img_lang_obs['location'][direction]]
         for i, label in enumerate(obj_label_descript):
-            room_descript[obs['cleand_sensor_dir'][i]].append(label)
+            room_descript[img_lang_obs['cleand_sensor_dir'][i]].append(label)
 
         # TODO: add weight on differentt direction based on object num in each direction
             
@@ -410,7 +412,7 @@ class Navigator:
                     break
         return est_state, room_descript
     
-    def update_scene_graph(self, obs, flag = False):
+    def update_scene_graph(self, img_lang_obs, flag = False):
         """
         Updates scene graph using localisation estimate from LLM, and
         observations from VLM.
@@ -428,12 +430,12 @@ class Navigator:
         locations = []
         obj_bbox = []
         idx_sensordirection = []
-        for direction in obs['object'].keys():
-            obj_label += obs['object'][direction][1]
-            idx_sensordirection += [direction for i in range(len(obs['object'][direction][1]))]
-            cropped_imgs +=  obs['object'][direction][2]
-            locations += [obs['location'][direction]]
-            obj_bbox += [obs['object'][direction][0]]
+        for direction in img_lang_obs['object'].keys():
+            obj_label += img_lang_obs['object'][direction][1]
+            idx_sensordirection += [direction for i in range(len(img_lang_obs['object'][direction][1]))]
+            cropped_imgs +=  img_lang_obs['object'][direction][2]
+            locations += [img_lang_obs['location'][direction]]
+            obj_bbox += [img_lang_obs['object'][direction][0]]
 
         obs_location = most_common(locations)
         obj_bbox = torch.cat(obj_bbox, dim = 0)
@@ -454,16 +456,33 @@ class Navigator:
             try:
                 # Query LLM to classify detected objects in 'room','entrance' and 'object' 
                 seperate_ans = self.llm.query_object_class(whole_query)
+                node_type = self.scene_graph.scene_graph_specs.keys()
+                node_type_idx = [] 
+                for node_name in node_type:
+                    temp_idx = seperate_ans.index(node_name)
+                    node_type_idx.append(temp_idx)
 
-                room_idx = seperate_ans.index('room')
-                entrance_idx = seperate_ans.index('entrance')
-                object_idx = seperate_ans.index('object')
+                # room_idx = seperate_ans.index('room')
+                # entrance_idx = seperate_ans.index('entrance')
+                # object_idx = seperate_ans.index('object')
                 
-                room_lst = seperate_ans[room_idx+1:entrance_idx]
-                entrance_lst = seperate_ans[entrance_idx+1:object_idx]
-                object_lst = seperate_ans[object_idx+1:]
+                node_lst = {}
+                format_test = []
+                for i, node_name in enumerate(node_type):
+                    if node_name == 'room':
+                        continue
+                    if i != (len(node_type)-1):
+                        temp_node_lst = seperate_ans[node_type_idx[i]+1:node_type_idx[i+1]]
+                    else:
+                        temp_node_lst = seperate_ans[node_type_idx[i]+1:]
+                    node_lst[node_name] =  temp_node_lst
+                    format_test += temp_node_lst
 
-                format_test = entrance_lst + object_lst
+                # room_lst = seperate_ans[room_idx+1:entrance_idx]
+                # entrance_lst = seperate_ans[entrance_idx+1:object_idx]
+                # object_lst = seperate_ans[object_idx+1:]
+
+                # format_test = entrance_lst + object_lst
                 qualified_node = []
                 for item in format_test:
                     if item != 'none':
@@ -482,7 +501,7 @@ class Navigator:
         cleand_sensor_dir = []
         cleaned_object_lst = []
         to_be_updated_nodes = []
-        for obj in object_lst:
+        for obj in node_lst['object']:
             try:
                 bb_idx = int(obj.split('_')[1])
             except:
@@ -491,12 +510,12 @@ class Navigator:
                 cropped_img_lst.append(cropped_imgs[bb_idx])
                 cleand_sensor_dir.append(idx_sensordirection[bb_idx])
                 cleaned_object_lst.append(obj)
-        obs['cleaned_object'] = cleaned_object_lst
-        obs['cleaned_object_cropped_img'] = cropped_img_lst
-        obs['cleand_sensor_dir'] = cleand_sensor_dir
+        img_lang_obs['cleaned_object'] = cleaned_object_lst
+        img_lang_obs['cleaned_object_cropped_img'] = cropped_img_lst
+        img_lang_obs['cleand_sensor_dir'] = cleand_sensor_dir
 
         print('-------------  State Estimation --------------')
-        est_state, room_description = self.estimate_state(obs)
+        est_state, room_description = self.estimate_state(img_lang_obs)
         print('Room Description', room_description) 
         # Update Room Node
         print("State Estimation:", est_state)
@@ -508,6 +527,7 @@ class Navigator:
             # TODO: how we update explored node
 
         else: # Enter a new node
+            last_state = self.current_state
             new_node = self.scene_graph.add_node("room", obs_location, {"active": True, "image": np.random.rand(4, 4), "description": room_description})
             # If last goal is entrance, we connect last state and current state with this entrance.
             if self.last_subgoal != None and self.scene_graph.is_type(self.last_subgoal, 'object'):
@@ -517,8 +537,9 @@ class Navigator:
             
             if self.last_subgoal != None:
                 # If last subgoal is entrance, after we pass through the entrance, we need to decide which entrance we passed through
-                if self.scene_graph.is_type(self.last_subgoal, 'entrance'):
+                if 'entrance' in self.scene_graph.scene_graph_specs.keys() and self.scene_graph.is_type(self.last_subgoal, 'entrance'):
                     find_last_entrance = False
+                    entrance_lst = node_lst['entrance']
                     self.scene_graph.add_edge(self.current_state, self.last_subgoal, "connects to")
                     self.explored_node.append(self.last_subgoal)
                     for idx, item in enumerate(entrance_lst):
@@ -542,7 +563,7 @@ class Navigator:
                     if not find_last_entrance:
                         self.scene_graph.nodes()[self.last_subgoal]['active'] = False
                 # If last subgoal is room, we directly connects two room
-                elif self.scene_graph.is_type(self.last_subgoal, 'room'):
+                elif self.scene_graph.is_type(self.last_subgoal, 'object') and self.last_subgoal in self.scene_graph.get_related_codes(last_state,'contains'):
                     self.scene_graph.add_edge(self.current_state, self.last_subgoal, "connects to")
                     self.explored_node.append(self.last_subgoal)
                 else:
@@ -557,50 +578,51 @@ class Navigator:
         
         # TODO: If the reply does not have '_', update fails.
         bbox_idx_to_obj_name = {}
-        for item in object_lst:
-            if item == 'none':
+        for node_type in self.scene_graph.scene_graph_specs.keys():
+            if node_type == 'room':
                 continue
-            try:
-                if '_' in item:
-                    obj_name = item.split('_')[0]
-                    if obj_name in all_room: # if the object name is also room name, skip it. otherwise the room name may point to object node
+            elif node_type == 'object':
+                for item in node_lst['object']:
+                    if item == 'none':
                         continue
-                    bb_idx = int(item.split('_')[1])
-                    sensor_dir = idx_sensordirection[bb_idx]
-                    temp_obj = self.scene_graph.add_node("object", obj_name, {"active": True, "image": cropped_imgs[bb_idx],"bbox": obj_bbox[bb_idx], "cam_uuid": sensor_dir})
-                    self.scene_graph.add_edge(self.current_state, temp_obj, "contains")
-                    bbox_idx_to_obj_name[bb_idx] = temp_obj
-            except:
-                print(f'Scene Graph: Fail to add object item {item}')
-
-        for item in entrance_lst:
-            if item == 'none':
-                continue
-            if '_' in item:
-                entrance_name = item.split('_')[0]
-                bb_idx = int(item.split('_')[1])
-                
-                if self.current_state[:-2] == entrance_name: # handle wrong entrance name, (To be deleted).
-                    continue
-                # try:
-                sensor_dir = idx_sensordirection[bb_idx] # get the sensor direction for this entrance
-                if 'LAST' in item:
-                    temp_entrance = self.last_subgoal
-                    self.scene_graph.nodes()[temp_entrance]['image'] = cropped_imgs[bb_idx]
-                    self.scene_graph.nodes()[temp_entrance]['bbox'] = obj_bbox[bb_idx]
-                    self.scene_graph.nodes()[temp_entrance]['cam_uuid'] = sensor_dir
-                    self.scene_graph.nodes()[temp_entrance]['active'] = True
-                else:
-                    temp_entrance = self.scene_graph.add_node("entrance", entrance_name, {"active": True,"image": cropped_imgs[bb_idx],"bbox": obj_bbox[bb_idx],"cam_uuid": sensor_dir})
-                self.scene_graph.add_edge(self.current_state, temp_entrance, "connects to")
-                bbox_in_specific_dir = np.where(np.array(idx_sensordirection) == sensor_dir)[0] # get all objects in the direction
-                nearby_bbox_idx = self.get_nearby_bbox(obj_bbox[bb_idx],obj_bbox[bbox_in_specific_dir,])
-                for idx in nearby_bbox_idx:
-                    if idx in bbox_idx_to_obj_name.keys():
-                        new_obj = bbox_idx_to_obj_name[idx] 
-                        self.scene_graph.add_edge(temp_entrance, new_obj, "is near")
-                # except:
-                #     print('ERROR')
+                    try:
+                        if '_' in item:
+                            obj_name = item.split('_')[0]
+                            if obj_name in all_room: # if the object name is also room name, skip it. otherwise the room name may point to object node
+                                continue
+                            bb_idx = int(item.split('_')[1])
+                            sensor_dir = idx_sensordirection[bb_idx]
+                            temp_obj = self.scene_graph.add_node("object", obj_name, {"active": True, "image": cropped_imgs[bb_idx],"bbox": obj_bbox[bb_idx], "cam_uuid": sensor_dir})
+                            self.scene_graph.add_edge(self.current_state, temp_obj, "contains")
+                            bbox_idx_to_obj_name[bb_idx] = temp_obj
+                    except:
+                        print(f'Scene Graph: Fail to add object item {item}')
+            elif node_type == 'entrance':
+                for item in node_lst['entrance']:
+                    if item == 'none':
+                        continue
+                    if '_' in item:
+                        entrance_name = item.split('_')[0]
+                        bb_idx = int(item.split('_')[1])
+                        
+                        if self.current_state[:-2] == entrance_name: # handle wrong entrance name, (To be deleted).
+                            continue
+                        sensor_dir = idx_sensordirection[bb_idx] # get the sensor direction for this entrance
+                        if 'LAST' in item:
+                            temp_entrance = self.last_subgoal
+                            self.scene_graph.nodes()[temp_entrance]['image'] = cropped_imgs[bb_idx]
+                            self.scene_graph.nodes()[temp_entrance]['bbox'] = obj_bbox[bb_idx]
+                            self.scene_graph.nodes()[temp_entrance]['cam_uuid'] = sensor_dir
+                            self.scene_graph.nodes()[temp_entrance]['active'] = True
+                        else:
+                            temp_entrance = self.scene_graph.add_node("entrance", entrance_name, {"active": True,"image": cropped_imgs[bb_idx],"bbox": obj_bbox[bb_idx],"cam_uuid": sensor_dir})
+                        self.scene_graph.add_edge(self.current_state, temp_entrance, "connects to")
+                        bbox_in_specific_dir = np.where(np.array(idx_sensordirection) == sensor_dir)[0] # get all objects in the direction
+                        nearby_bbox_idx = self.get_nearby_bbox(obj_bbox[bb_idx],obj_bbox[bbox_in_specific_dir,])
+                        for idx in nearby_bbox_idx:
+                            if idx in bbox_idx_to_obj_name.keys():
+                                new_obj = bbox_idx_to_obj_name[idx] 
+                                self.scene_graph.add_edge(temp_entrance, new_obj, "is near")
 
         # Only when we are still in the same node, we need to update the features of doors.
         if len(to_be_updated_nodes) > 0:
@@ -794,13 +816,20 @@ class Navigator:
         location = img_lang_obs['location']
         obj_lst = img_lang_obs['object']
     
-        print(f'Location: {location}\nObjecet: {obj_lst}')
+        print(f'Location: {location}\nObject: {obj_lst}')
 
-        # obj_label_tmp = ['forward'] + img_lang_obs['object']['forward'][1] + ['left'] + img_lang_obs['object']['left'][1] + ['right'] + img_lang_obs['object']['right'][1] + ['rear'] + img_lang_obs['object']['rear'][1]
-        # self.action_logging.write(f'[Obs]: Location: {location}\nObjecet: {obj_label_tmp}\n')
+        obj_label_tmp = []
+        for direction in obs.keys():
+            if direction == 'info':
+                continue
+            obj_label_tmp += [direction]
+            obj_label_tmp += img_lang_obs['object'][direction][1]
+        self.action_logging.write(f'[Obs]: Location: {location}\nObjecet: {obj_label_tmp}\n')
                 
         for direction in obs.keys():
-            obs_rgb = obs[direction + '_rgb']
+            if direction == 'info':
+                continue
+            obs_rgb = obs[direction]
             plt.imshow(obs_rgb.squeeze())
             ax = plt.gca()
             for i in range(len(img_lang_obs['object'][direction][1])):
@@ -821,19 +850,21 @@ class Navigator:
         next_label = None
         current_size = 0
         for direction in obs.keys():
+            if direction == 'info':
+                continue
             for i in range(len(img_lang_obs['object'][direction][1])):
                 label = img_lang_obs['object'][direction][1][i]
                 if self.check_goal(label):
                     if flag == False:
                         next_position = img_lang_obs['object'][direction][0][i].type(torch.int64).tolist()
-                        next_cam_uuid = direction +'_depth'
+                        next_cam_uuid = direction
                         flag = True
                         next_label = label
                         min_x, min_y, max_x, max_y = next_position
                     elif (max_x-min_x) * (max_y - min_y) > current_size:
                         current_size = (max_x-min_x) * (max_y - min_y)
                         next_position = img_lang_obs['object'][direction][0][i].type(torch.int64).tolist()
-                        next_cam_uuid = direction +'_depth'
+                        next_cam_uuid = direction
                         next_label = label
         if flag:
             self.is_navigating = True
@@ -878,24 +909,26 @@ class Navigator:
         next_goal = self.last_subgoal
         print('Next Subgoal:', next_goal, self.scene_graph.scene_graph[next_goal])
         next_position = self.scene_graph.get_node_attr(next_goal)['bbox'].type(torch.int64).tolist()
-        cam_uuid = self.scene_graph.get_node_attr(next_goal)['cam_uuid']+'_depth'
+        cam_uuid = self.scene_graph.get_node_attr(next_goal)['cam_uuid']
         return next_goal, next_position, cam_uuid
 
     def visualise_chosen_goal(self, obs, next_position, next_goal, cam_uuid):
         min_x, min_y, max_x, max_y = next_position
-        plt.imshow(obs[cam_uuid[:-5]+'rgb'].squeeze())
+        plt.imshow(obs[cam_uuid].squeeze())
         ax = plt.gca()
         ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
         ax.text(min_x, min_y, next_goal)
         plt.savefig(self.trial_folder + '/'  + time.strftime("%Y%m%d%H%M%S") + "_chosen_rgb_" + str(cam_uuid[:-6]) + ".png")
         plt.clf()
 
-        plt.imshow(obs[cam_uuid[:-5]+'depth'].squeeze())
-        ax = plt.gca()
-        ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
-        ax.text(min_x, min_y, next_goal)
-        plt.savefig(self.trial_folder + '/'  + time.strftime("%Y%m%d%H%M%S") + "_chosen_depth_" + str(cam_uuid[:-6]) + ".png")
-        plt.clf()
+
+        if 'info' in obs.keys() and (cam_uuid+'_depth') in obs['info']:
+            plt.imshow(obs['info'][cam_uuid+'_depth'].squeeze())
+            ax = plt.gca()
+            ax.add_patch(plt.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y, edgecolor='green', facecolor=(0,0,0,0), lw=2))
+            ax.text(min_x, min_y, next_goal)
+            plt.savefig(self.trial_folder + '/'  + time.strftime("%Y%m%d%H%M%S") + "_chosen_depth_" + str(cam_uuid[:-6]) + ".png")
+            plt.clf()
 
     def loop(self, obs):
         """

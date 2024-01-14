@@ -77,21 +77,23 @@ class NavigatorHomeRobot(Navigator):
     
         if self.goal == "tv_monitor":
             self.goal = "tv"
+        elif self.goal == "potted plant":
+            self.goal = "plant"
         # Set up controller
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         # self.controller = FMMController(self.device, env_config=self.config)
 
         selected_traversable_categories = []
-        for i in ["stair", "stairs"]:
-            if i in env_semantic_names:
-                selected_traversable_categories.append(i)
+        # for i in ["stair", "stairs"]:
+        #     if i in env_semantic_names:
+        #         selected_traversable_categories.append(i)
 
         self.controller = FMMController(
             self.device, 
             env_config=self.config,
-            semantic_categories=["others"] + selected_traversable_categories,
-            semantic_annotations=env_semantic_names,
-            traversable_categories=selected_traversable_categories,
+            # semantic_categories=["others"] + selected_traversable_categories,
+            # semantic_annotations=env_semantic_names,
+            # traversable_categories=selected_traversable_categories,
         )
 
             # Set up flags
@@ -134,6 +136,8 @@ class NavigatorHomeRobot(Navigator):
           
         if self.goal == "tv_monitor":
             self.goal = "tv"
+        elif self.goal == "potted plant":
+            self.goal = "plant"
         # Reset controller
        
         # self.controller = FMMController(self.device, env_config=self.config)
@@ -164,6 +168,7 @@ class NavigatorHomeRobot(Navigator):
             images: dict of images taken at current pose
         """
         obs = self.env.get_observation()
+        # obs['sensor_label'] = ['left', 'forward', 'right', 'rear']
         return obs
     
     def run(self):
@@ -185,7 +190,7 @@ class NavigatorHomeRobot(Navigator):
 
         cv2.namedWindow("View")
 
-        while (self.action_step < self.max_episode_step) and (not self.success_flag) and (self.llm_loop_iter <= 40):
+        while (self.action_step < self.max_episode_step) and (self.llm_loop_iter <= 40):
             self.action_logging = open(self.action_log_path, 'a')
             obs = self._observe()
             self.controller.update(obs)
@@ -198,19 +203,29 @@ class NavigatorHomeRobot(Navigator):
             # paused and are awaiting next instructions.
             subgoal_position = None
             if not self.controller_active:
-                subgoal_position, cam_uuid = self.loop(obs)
+                preprocessed_obs = {'forward': obs['forward_rgb'], 'right': obs['right_rgb'], 'left': obs['left_rgb'], 'rear': obs['rear_rgb'], 'info':{'forward_depth':obs['forward_depth'], 'left_depth':obs['left_depth'], 'right_depth':obs['right_depth'], 'rear_depth':obs['rear_depth'],'forward_semantic':obs['forward_semantic'], 'left_semantic':obs['left_semantic'], 'right_semantic':obs['right_semantic'], 'rear_semantic':obs['rear_semantic'] } } 
+                subgoal_position, cam_uuid = self.loop(preprocessed_obs)
+                if self.check_goal(self.last_subgoal) and self.success_flag:
+                    self.action_logging.write(f"[END]: SUCCESS Checked! \n")
+                    break
+                elif (not self.check_goal(self.last_subgoal)) and self.success_flag:
+                    self.success_flag = False
                 print('Set Subgoals:',subgoal_position)
                 if subgoal_position is not None:
+                    if self.dataset == 'gibson' and  ('television' in self.last_subgoal or 'tv' in self.last_subgoal):
+                        subgoal_position[1] += 150
+                        subgoal_position[3] += 150
                     try:
                         self.controller.set_subgoal_image(
                             subgoal_position,
-                            cam_uuid,
+                            cam_uuid + '_depth',
                             obs,
                             get_camera_matrix(640, 480, 90)
                         )
                         self.controller_active = True
                     except:
                         self.action_logging.write(f'ERROR: Cannot set subgoal to controller {subgoal_position}\n')
+                        self.llm_loop_iter += 1
             # Low-level perception-reasoning. Run all the time.
             # TODO:
 
@@ -223,7 +238,7 @@ class NavigatorHomeRobot(Navigator):
                 print('Control', action, success)
                 if action is None:
                     self.controller_active = False
-                    if self.check_goal(self.last_subgoal) and success:
+                    if self.check_goal(self.last_subgoal) and success and 'floor' not in self.last_subgoal:
                         self.success_flag = True
                         self.action_logging.write(f"[END]: SUCCESS\n")
                 else:
@@ -243,9 +258,11 @@ class NavigatorHomeRobot(Navigator):
             
         # Record ending position
         self.action_logging = open(self.action_log_path, 'a')
-        img_lang_obs = self.perceive(obs)
+        preprocessed_obs = {'forward': obs['forward_rgb'], 'right': obs['right_rgb'], 'left': obs['left_rgb'], 'rear': obs['rear_rgb'], 'info':{'forward_depth':obs['forward_depth'], 'left_depth':obs['left_depth'], 'right_depth':obs['right_depth'], 'rear_depth':obs['rear_depth'],'forward_semantic':obs['forward_semantic'], 'left_semantic':obs['left_semantic'], 'right_semantic':obs['right_semantic'], 'rear_semantic':obs['rear_semantic'] } } 
+        img_lang_obs = self.perceive(preprocessed_obs)
+        breakpoint()
         if self.visualisation:
-            self.visualise_objects(obs, img_lang_obs)            
+            self.visualise_objects(preprocessed_obs, img_lang_obs)            
     
         while not self.env.env.episode_over:
             self.env.act('stop')
@@ -261,14 +278,14 @@ class NavigatorHomeRobot(Navigator):
 
 if __name__ == "__main__":
     nav = NavigatorHomeRobot(task_config_path = 'configs/objectnav_gibson_v2_with_semantic.yaml', data_path = "configs/homerobot_gibson_objectnav.yaml")
-    test_episode = 3
+    test_episode = 10
     test_history = []
     # str(i) for i in range(test_episode)
     while True:
         scnen_path = nav.env.env.current_episode.scene_id
         scene_name = scnen_path[scnen_path.rfind('/')+1:scnen_path.rfind('.basis')]
         # episode = rerun_case[scene_name]
-        while str(nav.env.env.current_episode.episode_id) not in [str(i) for i in range(test_episode)] or ((nav.env.env.current_episode.scene_id + str(nav.env.env.current_episode.episode_id) ) in test_history):
+        while str(nav.env.env.current_episode.episode_id) not in ['4'] or ((nav.env.env.current_episode.scene_id + str(nav.env.env.current_episode.episode_id) ) in test_history):
             try:
                 print('RESET', nav.env.env.current_episode.episode_id,nav.env.env.current_episode.scene_id )
                 nav.reset()
@@ -278,4 +295,4 @@ if __name__ == "__main__":
         # try:
         nav.run()
         # except:
-            # print('error')
+        #     print('error')
