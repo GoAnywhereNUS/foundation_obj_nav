@@ -63,6 +63,7 @@ class Navigator:
         self.GT = False
         self.semantic_annotations = None
         self.goal_synonyms = None
+        self.perceive_filter = False
 
         self.trial_folder = self.create_log_folder()
         self.action_log_path = os.path.join(self.trial_folder, 'action.txt')
@@ -97,6 +98,7 @@ class Navigator:
         self.is_navigating = False
         self.success_flag = False
         self.goal_synonyms = None
+        self.perceive_filter = False
 
         # Reset logging
         self.trial_folder = self.create_log_folder()
@@ -298,10 +300,11 @@ class Navigator:
                 for i, objlabel in enumerate(objects[1]):
                     if 'glass' in objlabel:
                         remove_id +=  self.get_nearby_bbox(objects[0][i], objects[0], overlap_threshold = 0.7, distance_threshold = 0)
-                    if 'bed' in objlabel and self.llm_loop_iter < 2:
-                        remove_id.append(i)
-                    if self.check_goal(objlabel) and 'floor' in objlabel:
-                        remove_id.append(i)
+                    if self.perceive_filter:
+                        min_x, min_y, max_x, max_y = objects[0][i]
+                        if int(abs(max_x-min_x)) < 80 or int(abs(max_y-min_y)) < 80:
+                            remove_id.append(i)
+
                 bbox_lst = []
                 objlabel_lst = []
                 cropped_img_lst = []

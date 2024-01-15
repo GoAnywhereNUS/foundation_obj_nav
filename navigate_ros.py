@@ -35,7 +35,8 @@ class NavigatorROS(Navigator):
             self.node_config = yaml.safe_load(f)
         self.run_debug = run_debug
         self.visualiser.set_live_stream_id('mid')
-
+        self.perceive_filter = True
+        
         # Data structures and flags
         self.cam_ids = self.node_config['sensors']['camera_ids']
         self.image_buffer = {

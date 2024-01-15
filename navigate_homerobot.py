@@ -49,6 +49,11 @@ class NavigatorHomeRobot(Navigator):
         self.config = config
         self.env = ObjNavEnv(habitat.Env(config=config), config)
 
+        self.turn_left_amount = 30
+        for i in self.env.env.sim.config.agents[0].action_space.keys():
+            if self.env.env.sim.config.agents[0].action_space[i].name =='turn_left':
+                self.turn_left_amount = self.env.env.sim.config.agents[0].action_space[i].actuation.amount
+
         if 'hm3d' in task_config_path:
             self.dataset = 'hm3d'
             self.goal = self.env.env.current_episode.object_category
@@ -115,7 +120,12 @@ class NavigatorHomeRobot(Navigator):
         env_semantic_names = ['sofa' if x == 'couch' else x for x in env_semantic_names]
         env_semantic_names = ['toilet' if x == 'toilet seat' else x for x in env_semantic_names]
         self.semantic_annotations = env_semantic_names
-        
+
+        self.turn_left_amount = 30
+        for i in self.env.env.sim.config.agents[0].action_space.keys():
+            if self.env.env.sim.config.agents[0].action_space[i].name =='turn_left':
+                self.turn_left_amount = self.env.env.sim.config.agents[0].action_space[i].actuation.amount
+
         if 'hm3d' in self.dataset:
             self.goal = self.env.env.current_episode.object_category
         elif 'gibson' in self.dataset:
@@ -170,7 +180,20 @@ class NavigatorHomeRobot(Navigator):
         """
         obs = self.env.get_observation()
         # obs['sensor_label'] = ['left', 'forward', 'right', 'rear']
-        return obs
+        new_obs = {}
+        direction = ['left', 'rear', 'right','forward']
+        for dir in direction:
+            turn_round  = int(360/len(self.direction)/self.turn_left_amount)
+            for i in range(turn_round):
+                self.env.act('turn_left')
+                self.action_step += 1
+            tmp_obs = self.env.get_observation()
+            new_obs[dir+'_rgb'] = tmp_obs['forward_rgb']
+            new_obs[dir+'_depth'] = tmp_obs['forward_depth']
+            new_obs[dir+'_semantic'] = tmp_obs['forward_semantic']
+        new_obs['gps'] = obs['gps']
+        new_obs['compass'] = obs['compass']
+        return new_obs
     
     def run(self):
         """
