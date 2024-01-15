@@ -201,7 +201,7 @@ class NavigatorROS(Navigator):
             if obs is None:
                 continue
 
-            image = obs[main_cam + '_rgb']
+            image = obs[main_cam]
 
             if not self._controller.controller_active():
                 if perceive:
