@@ -180,20 +180,23 @@ class NavigatorHomeRobot(Navigator):
         """
         obs = self.env.get_observation()
         # obs['sensor_label'] = ['left', 'forward', 'right', 'rear']
-        new_obs = {}
-        direction = ['left', 'rear', 'right','forward']
-        for dir in direction:
-            turn_round  = int(360/len(self.direction)/self.turn_left_amount)
-            for i in range(turn_round):
-                self.env.act('turn_left')
-                self.action_step += 1
-            tmp_obs = self.env.get_observation()
-            new_obs[dir+'_rgb'] = tmp_obs['forward_rgb']
-            new_obs[dir+'_depth'] = tmp_obs['forward_depth']
-            new_obs[dir+'_semantic'] = tmp_obs['forward_semantic']
-        new_obs['gps'] = obs['gps']
-        new_obs['compass'] = obs['compass']
-        return new_obs
+        if not self.controller_active:
+            new_obs = {}
+            direction = ['left', 'rear', 'right','forward']
+            for dir in direction:
+                turn_round  = int(360/len(direction)/self.turn_left_amount)
+                for i in range(turn_round):
+                    self.env.act('turn_left')
+                    self.action_step += 1
+                tmp_obs = self.env.get_observation()
+                new_obs[dir+'_rgb'] = tmp_obs['forward_rgb']
+                new_obs[dir+'_depth'] = tmp_obs['forward_depth']
+                new_obs[dir+'_semantic'] = tmp_obs['forward_semantic']
+            new_obs['gps'] = obs['gps']
+            new_obs['compass'] = obs['compass']
+            return new_obs
+        else:
+            return obs
     
     def run(self):
         """
@@ -301,7 +304,7 @@ class NavigatorHomeRobot(Navigator):
         cv2.destroyAllWindows()
 
 if __name__ == "__main__":
-    nav = NavigatorHomeRobot(task_config_path = 'configs/objectnav_gibson_v2_with_semantic.yaml', data_path = "configs/homerobot_gibson_objectnav.yaml")
+    nav = NavigatorHomeRobot(task_config_path = 'configs/objectnav_hm3d_v2_with_semantic.yaml', data_path = "configs/homerobot_hm3d_objectnav.yaml")
     test_episode = 10
     test_history = []
     # str(i) for i in range(test_episode)
@@ -309,7 +312,7 @@ if __name__ == "__main__":
         scnen_path = nav.env.env.current_episode.scene_id
         scene_name = scnen_path[scnen_path.rfind('/')+1:scnen_path.rfind('.basis')]
         # episode = rerun_case[scene_name]
-        while str(nav.env.env.current_episode.episode_id) not in ['3'] or ((nav.env.env.current_episode.scene_id + str(nav.env.env.current_episode.episode_id) ) in test_history):
+        while str(nav.env.env.current_episode.episode_id) not in ['1'] or ((nav.env.env.current_episode.scene_id + str(nav.env.env.current_episode.episode_id) ) in test_history):
             try:
                 print('RESET', nav.env.env.current_episode.episode_id,nav.env.env.current_episode.scene_id )
                 nav.reset()
