@@ -3,7 +3,6 @@ import numpy as np
 
 class Visualiser:
     def __init__(self):
-        self.vis_image_dims = (900, 1200)
         self.layouts = [
             { # for observations with 2 views
                 'dims': (900, 1200),
@@ -125,6 +124,23 @@ class Visualiser:
                 im = obs[list(obs.keys()[0])]
             else:
                 im = obs[self.live_stream_id]
+
+            # Updating config if vis_image is None
+            if self.curr_layout is None:
+                self.curr_layout = self.layouts[1]
+                self.num_views = 4
+                if len(obs) <= 2:
+                    self.curr_layout = self.layouts[0]
+                    self.num_views = 2
+                elif len(obs) > 4:
+                    print("Only support 4 sensors! Using first 4 views.")
+
+            if vis_image is None:
+                vis_image_dims = self.curr_layout['dims']
+                print("Setting new vis_image:", vis_image_dims)
+                vis_image = np.ones((
+                    vis_image_dims[0], vis_image_dims[1], 3
+                )).astype(np.uint8) * 255
 
             # Laying out live stream
             image_dims = im.shape

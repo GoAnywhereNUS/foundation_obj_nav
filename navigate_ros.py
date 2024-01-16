@@ -110,12 +110,6 @@ class NavigatorROS(Navigator):
         """
         Runs the full navigator system
         """
-        #while not rospy.is_shutdown():
-        #    print({k:len(v) for k, v in self.image_buffer.items()})
-        #    import time
-        #    time.sleep(0.2)
-        #return
-
         if self.run_debug is not None:
             if self.run_debug == "pr":
                 self.run_pr()
@@ -132,18 +126,30 @@ class NavigatorROS(Navigator):
         # perception-reasoning. Unlike the sim version, control is not
         # handled in this loop, but is executed asynchronously on the
         # GNM server.
+        pause_after_pr = True
+        start_task = False
         while not rospy.is_shutdown():
             obs = self._observe()
-            if self.visualise:
-                self._visualise()
-
             if obs is not None:
                 # High-level perception-reasoning. Run when we have
                 # paused and are awaiting next instructions.
-                if not self._controller.controller_active():
+                if start_task and not self._controller.controller_active():
                     subgoal_image, cam_id = self.loop(obs)
                     if subgoal_image is not None:
                         original_image = obs[cam_id]
+
+                        if self.visualisation and pause_after_pr:
+                            rospy.loginfo("Paused...")
+                            if self.vis_image is not None:
+                                cv2.imshow("Vis", self.vis_image)
+                            key = cv2.waitKey(0)
+                            if key == ord('r'):
+                                rospy.logwarn('Resetting!')
+                                goal = self.goal
+                                self.reset()
+                                self.goal = goal
+                                start_task = False
+
                         self._controller.set_subgoal_image(
                             subgoal_image,
                             original_image
@@ -152,11 +158,27 @@ class NavigatorROS(Navigator):
                 # TODO: Low-level perception-reasoning. Run all the time.
 
                 if self.visualisation:
+                    self.vis_image = self.visualiser.visualise_live(self.vis_image, obs)
                     cv2.imshow("Vis", self.vis_image)
 
             key = cv2.waitKey(50)
             if key == ord('q'):
                 break
+            elif key == ord('r'):
+                rospy.logwarn("Resetting!")
+                goal = self.goal
+                self.reset()
+                self.goal = goal
+                start_task = False
+            elif key == ord('c'):
+                self._controller.cancel_goal()
+            elif key == ord('p'):
+                pause_after_pr = False
+            elif key == ord('s'):
+                start_task = True
+            elif key == ord('k'):
+                start_task = False
+
             # rate.sleep()
 
     def run_pr(self):
@@ -173,7 +195,7 @@ class NavigatorROS(Navigator):
                     subgoal_image, cam_id = self.loop(obs)
                     active = True
 
-                if self.visualisation:
+                if self.visualisation and self.vis_image is not None:
                     self.vis_image = self.visualiser.visualise_live(self.vis_image, obs)
                     
             cv2.imshow("Vis", self.vis_image)
@@ -291,6 +313,18 @@ class NavigatorROS(Navigator):
                             return
 
 if __name__ == "__main__":
-    node = NavigatorROS(run_debug="pr")
+    scene_graph_specs = """
+    {
+        "room": {
+            "contains": ["object"],
+            "connects to": ["room"]
+        },
+        "object": {
+        },
+        "state": ["room"]
+    }
+    """
+
+    node = NavigatorROS(scene_graph_specs=scene_graph_specs, run_debug=None)
     node.goal = "armchair"
     node.run()

@@ -42,7 +42,8 @@ class GNMController(Controller):
         print(result)
 
     def _feedback_cb(self, feedback):
-        print(feedback)
+        pass
+        #print(feedback)
 
     def _bbox2crop(self, img, tlx, tly, brx, bry):
         """
