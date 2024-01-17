@@ -127,11 +127,11 @@ Answer: livingroom_1"""
 
 ##############################
 
-CLS_USER_EXAMPLE_1 = """There is a list: ["livingroom_0", "hallway_1", "window_13","door_2", "door frame_18", "doorway_3", "table_4","chair_5","livingroom sofa_6", "floor_7", "wall_8", "doorway_9", "stairs_10"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes. Ignore floor, ceiling and wall."""
+CLS_USER_EXAMPLE_1 = """There is a list: ["livingroom_0", "hallway_1", "window_13","door_2", "door frame_18", "doorframe_3", "table_4","chair_5","livingroom sofa_6", "floor_7", "wall_8", "doorway_9", "stairs_10"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes. Ignore floor, ceiling and wall."""
 
 CLS_AGENT_EXAMPLE_1 = """Answer:
 room: livingroom_0
-entrance: door_2, doorway_3, hallway_1, doorway_9, stairs_10, door frame_18
+entrance: door_2, doorframe_3, hallway_1, doorway_9, stairs_10, doorframe_18
 object: table_4, chair_5, sofa_6, window_13"""
 
 CLS_USER_EXAMPLE_2 = """There is a list: ["bathroom_0", "bathroom mirror_1","bathroom sink_2","toilet_3", "bathroom bathtub_4", "lamp_5", "ceiling_10"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes. Ignore floor, ceiling and wall."""

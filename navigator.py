@@ -359,7 +359,7 @@ class Navigator:
                 temp_discript1 = ", ".join(discript[0][direction])
                 discript1 +=  f"On the {direction}, there is {temp_discript1}."
                 temp_discript2 = ", ".join(discript[1][direction])
-                discript1 +=  f"On the {direction}, there is {temp_discript2}."
+                discript2 +=  f"On the {direction}, there is {temp_discript2}."
             discript1 += '\n'
             discript2 += '\n'
             question = "These are depictions of what I observe from two different vantage points. Please tell me if these two viewpoints correspond to the same room. It's important to note that the descriptions may originate from two positions within the room, each with a distinct angle. Therefore, the descriptions may pertain to the same room but not necessarily capture the same elements. Please be aware that my viewing angle varies, so it is not necessary for the elements to align in the same direction. As long as the relative positions between objects are accurate, it is considered acceptable. Please assess the arrangement of objects and identifiable features in the descriptions to determine whether these two positions are indeed in the same place. Provide a response of True or False, along with supporting reasons."
@@ -607,7 +607,17 @@ class Navigator:
         
         # TODO: If the reply does not have '_', update fails.
         bbox_idx_to_obj_name = {}
-        for node_type in self.scene_graph.scene_graph_specs.keys():
+
+        # TODO: hierarchical structure?
+        scene_node_type = list(self.scene_graph.scene_graph_specs.keys())
+        if 'entrance' in scene_node_type:
+            scene_node_type.remove('entrance')
+            scene_node_type = ['entrance'] + scene_node_type
+        if 'object' in scene_node_type:
+            scene_node_type.remove('object')
+            scene_node_type = ['object'] + scene_node_type
+        breakpoint()
+        for node_type in scene_node_type:
             if node_type == 'room':
                 continue
             elif node_type == 'object':
@@ -652,7 +662,6 @@ class Navigator:
                             if idx in bbox_idx_to_obj_name.keys():
                                 new_obj = bbox_idx_to_obj_name[idx] 
                                 self.scene_graph.add_edge(temp_entrance, new_obj, "is near")
-
         # Only when we are still in the same node, we need to update the features of doors.
         if len(to_be_updated_nodes) > 0:
             current_entrance = self.scene_graph.get_related_codes(self.current_state,'connects to')
@@ -976,7 +985,8 @@ class Navigator:
         find_goal_flag, potential_next_pos, potential_cam_uuid = self.check_current_obs(obs, img_lang_obs)
         if find_goal_flag:
             if self.visualisation:
-               self.visualise_chosen_goal(obs, potential_next_pos, self.last_subgoal, potential_cam_uuid)
+                self.visualise_objects(obs, img_lang_obs)
+                self.visualise_chosen_goal(obs, potential_next_pos, self.last_subgoal, potential_cam_uuid)
                 # self.vis_image = self.visualiser.visualise_obs(
                 #     obs,
                 #     img_lang_obs,
@@ -996,7 +1006,6 @@ class Navigator:
         print('-------------  Plan Path --------------')
         path = self.plan_path(self.goal)
         self.is_navigating = True
-
         next_goal, next_position, cam_uuid = self.ground_plan_to_bbox()
         self.action_logging.write(f'Path: {path}, Next Goal: {next_goal}\n')
 
