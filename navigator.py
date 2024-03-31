@@ -45,7 +45,9 @@ class Navigator:
         self.scene_graph = SceneGraph(scene_graph_specs)
         scene_graph_specs_dict = json.loads(scene_graph_specs)
         self.state_spec = scene_graph_specs_dict["state"]
-        self.current_state = {node_type: None for node_type in self.state_spec}
+        # self.current_state = {node_type: None for node_type in self.state_spec}
+        self.current_state = None
+        self.current_floor = None
 
         # Set up parameters to be used in reasoning
         self.llm_max_query = 10
@@ -91,6 +93,8 @@ class Navigator:
         self.path = []
         self.last_subgoal = None
         self.goal = None
+        self.current_state = None
+        self.current_floor = None
 
         # Reset variables
         self.action_step = 0
@@ -208,6 +212,7 @@ class Navigator:
         
         for i in self.goal_synonyms:
             if i in label:
+                print('Find Goal', label, self.goal_synonyms)
                 return True
         return False 
 
@@ -230,6 +235,8 @@ class Navigator:
         #         return self.goal == label
         # if self.goal == 'plant':
         #     if label == 'ornamental plant':
+        #         return False
+        #     elif 'stool' in label:
         #         return False
         #     else:
         #         return self.goal in label
@@ -268,7 +275,7 @@ class Navigator:
                         max_y = np.max(instance_index[:,0])
                         min_x = np.min(instance_index[:,1])
                         max_x = np.max(instance_index[:,1])
-                        if (max_x - min_x) * (max_y - min_y) < 50:
+                        if (max_x - min_x) * (max_y - min_y) < 1000:
                             continue
                         elif (max_x - min_x) * (max_y - min_y) < 200 and (not self.check_goal(instance_label)):
                             continue
@@ -379,7 +386,9 @@ class Navigator:
             start_question = "There is a list:"
             end_question = f"Please check whether {goal} is in the list. Please reply the object with its index. Always follow the format: Answer: <your answer>."
             whole_query = start_question + discript + end_question
-        return whole_query
+        elif query_type == "region_abstract":
+            start_question = f"Previously, we were in the {discript[0]}, and we move towards {goal}. Now we arrive in a {discript[1]}. Do you think the current state {discript[1]} belongs to any of the existing region abstractions: {discript[2]}? If it belongs to any other existing region abstraction, return the region abstraction name; otherwise propose the name for this new section formatted as \"<name> Section (New)\". Ensure that your response follows the format: Reasoning: <your reasoning>. Answer: <your answer>"
+        return start_question
 
     def estimate_state(self, img_lang_obs):
         """
@@ -415,11 +424,31 @@ class Navigator:
 
         room_lst_scene_graph = self.scene_graph.get_secific_type_nodes('room')
         all_room = [room[:room.index('_')] for room in room_lst_scene_graph]
-        # if current room is already in scene graph
+       
+        # if current room type is already in scene graph
         if obs_location in all_room:
-            indices = [index for index, element in enumerate(all_room) if element == obs_location]
-            for i in indices:
-                similar_room = room_lst_scene_graph[i]
+            all_similar_room = [element for element in room_lst_scene_graph if element[:element.index('_')] == obs_location]
+            
+            # TODO: In the scene graph, there are ['kitchen_1', 'livingroom_1', 'livingroom_2', 'bedroom_1', 'officeroom_2']. Now I find a 'livingroom', please give me room name with similar semantic meaning in the list. Directly return me the answer in a Python list. Follow the format: Answer: <your answer>.
+            nearness_prior = []
+            for room_candidate in all_similar_room:
+                if self.scene_graph.has_path(self.current_state, room_candidate):
+                    path = self.scene_graph.plan_shortest_paths(self.current_state, room_candidate)
+                    path = [ i for i in path if self.scene_graph.is_type(i, 'room')]
+                    path_length = len(path)
+                else:
+                    path_length = np.inf
+                nearness_prior.append(path_length)
+                # Zip the two lists together
+                combined_lists = list(zip(nearness_prior, all_similar_room))
+                # Sort the combined list in decreasing order based on the elements of list1
+                sorted_combined_lists = sorted(combined_lists, key=lambda x: x[0])
+                # Unzip the sorted list to get the desired result
+                sorted_nearness_prior, sorted_all_similar_room = zip(*sorted_combined_lists)
+
+            similar_room_score = []
+            similar_room_lst = []
+            for similar_room in sorted_all_similar_room:
                 similar_room_description = self.scene_graph.get_node_attr(similar_room)['description']
 
                 store_ans = []
@@ -435,10 +464,14 @@ class Navigator:
         
                 print("State Estimation:", store_ans)
 
-                is_similar = most_common(store_ans)
-                if is_similar:
-                    est_state = similar_room
-                    break
+                if len(store_ans) > 0 :
+                    similar_room_score.append(sum(store_ans)/len(store_ans))
+                else:
+                    similar_room_score.append(0)
+                similar_room_lst.append(similar_room)
+            if max(similar_room_score) >= 0.5:
+                candidate_node_idx = similar_room_score.index(max(similar_room_score))
+                est_state = similar_room_lst[candidate_node_idx]
         return est_state, room_descript
     
     def update_scene_graph(self, img_lang_obs, flag = False):
@@ -600,6 +633,20 @@ class Navigator:
 
             print(f'Add new node: {self.current_state}')
         
+        '''
+        Region Abstraction
+        '''
+
+        # for layer in list(self.scene_graph.scene_graph_specs.keys()):
+        #     if layer not in ['object', 'entrance']:
+        #         Scene_Discript = self.scene_graph.print_scene_graph(selected_node = self.current_state, pretty=False, skip_object=True)
+        #         whole_query = self.generate_query([last_state, self.current_state, Scene_Discript], self.last_subgoal ,'region_abstract')
+        #         ans = self.llm.query_state_estimation(whole_query)
+        #         if 'new' in ans:
+        #             new_region_node = self.scene_graph.add_node("layer", ans[0], {"active": True, "image": np.random.rand(4, 4)})
+        #         self.current_floor = new_region_node
+        #         self.scene_graph.add_edge(new_region_node, self.current_state, "contains")
+
         self.action_logging.write(f'[State]: {self.current_state}\n')
         
         room_lst_scene_graph = self.scene_graph.get_secific_type_nodes('room')
@@ -616,7 +663,6 @@ class Navigator:
         if 'object' in scene_node_type:
             scene_node_type.remove('object')
             scene_node_type = ['object'] + scene_node_type
-        breakpoint()
         for node_type in scene_node_type:
             if node_type == 'room':
                 continue
