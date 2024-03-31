@@ -644,8 +644,8 @@ class Navigator:
         #         ans = self.llm.query_state_estimation(whole_query)
         #         if 'new' in ans:
         #             new_region_node = self.scene_graph.add_node("layer", ans[0], {"active": True, "image": np.random.rand(4, 4)})
-        #         self.current_floor = new_region_node
-        #         self.scene_graph.add_edge(new_region_node, self.current_state, "contains")
+        #             self.current_floor = new_region_node
+        #             self.scene_graph.add_edge(new_region_node, self.current_state, "contains")
 
         self.action_logging.write(f'[State]: {self.current_state}\n')
         
