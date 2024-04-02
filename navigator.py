@@ -387,8 +387,8 @@ class Navigator:
             end_question = f"Please check whether {goal} is in the list. Please reply the object with its index. Always follow the format: Answer: <your answer>."
             whole_query = start_question + discript + end_question
         elif query_type == "region_abstract":
-            start_question = f"Previously, we were in the {discript[0]}, and we move towards {goal}. Now we arrive in a {discript[1]}. Do you think the current state {discript[1]} belongs to any of the existing region abstractions: {discript[2]}? If it belongs to any other existing region abstraction, return the region abstraction name; otherwise propose the name for this new section formatted as \"<name> Section (New)\". Ensure that your response follows the format: Reasoning: <your reasoning>. Answer: <your answer>"
-        return start_question
+            whole_query = f"Previously, we were in the {discript[0]}, and we move towards {goal}. Now we arrive in a {discript[1]}. Do you think the current state {discript[1]} belongs to any of the existing region abstractions: {discript[2]}? If it belongs to any other existing region abstraction, return the region abstraction name; otherwise propose the name for this new section formatted as \"<name> Section (New)\". Ensure that your response follows the format: Reasoning: <your reasoning>. Answer: <your answer>"
+        return whole_query
 
     def estimate_state(self, img_lang_obs):
         """
