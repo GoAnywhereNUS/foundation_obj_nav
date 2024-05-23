@@ -98,6 +98,8 @@ class SceneGraph:
         saved_entrances_feat = []
         saved_objects = []
         for entr in entrances:
+            if not self.scene_graph.is_type(entr, 'entrance'):
+                continue
             self.scene_graph.nodes[entr]['active'] = False
             if len(self.get_related_codes(entr, 'connects to')) > 1:
                 saved_entrances.append(entr)

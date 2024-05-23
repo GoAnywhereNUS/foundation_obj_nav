@@ -381,7 +381,7 @@ class Navigator:
             whole_query = start_question + discript + end_question
         return whole_query
 
-    def estimate_state(self, img_lang_obs):
+    def estimate_state(self, node_lst, O_det):
         """
         Queries the LLM with the observations and scene graph to
         get our current state.
@@ -397,27 +397,38 @@ class Navigator:
                    particular level, and semantic_label is the language label to that node 
                    from the VLM.
         """
-        
+
+
+        cropped_img_lst = []
+        cleand_sensor_dir = []
+        cleaned_object_lst = []
+        for obj in node_lst['object']:
+            try:
+                bb_idx = int(obj.split('_')[1])
+            except:
+                continue
+            if bb_idx < len(O_det['cropped_imgs']): # in case LLM return index out of range
+                cropped_img_lst.append(O_det['cropped_imgs'][bb_idx])
+                cleand_sensor_dir.append(O_det['idx_sensordirection'][bb_idx])
+                cleaned_object_lst.append(obj)
+
         est_state = None
 
-        obj_label_descript = self.query_detailed_descript(img_lang_obs['cleaned_object'], img_lang_obs['cleaned_object_cropped_img'])
+        obj_label_descript = self.query_detailed_descript(cleaned_object_lst, cropped_img_lst)
         room_descript = {}
         locations = []
-        for direction in img_lang_obs['location'].keys():
+        for direction in list(set(O_det['idx_sensordirection'])):
             room_descript[direction] = []
-            locations += [img_lang_obs['location'][direction]]
         for i, label in enumerate(obj_label_descript):
-            room_descript[img_lang_obs['cleand_sensor_dir'][i]].append(label)
+            room_descript[cleand_sensor_dir[i]].append(label)
 
         # TODO: add weight on differentt direction based on object num in each direction
             
-        obs_location = most_common(locations)
-
         room_lst_scene_graph = self.scene_graph.get_secific_type_nodes('room')
         all_room = [room[:room.index('_')] for room in room_lst_scene_graph]
         # if current room is already in scene graph
-        if obs_location in all_room:
-            indices = [index for index, element in enumerate(all_room) if element == obs_location]
+        if O_det['obs_location'] in all_room:
+            indices = [index for index, element in enumerate(all_room) if element == O_det['obs_location']]
             for i in indices:
                 similar_room = room_lst_scene_graph[i]
                 similar_room_description = self.scene_graph.get_node_attr(similar_room)['description']
@@ -441,7 +452,154 @@ class Navigator:
                     break
         return est_state, room_descript
     
-    def update_scene_graph(self, img_lang_obs, flag = False):
+    def ClassifyLayers(self, obj_label):
+        """
+        Input:
+            obj_label: ['desk_1', 'door_2', ...]
+        
+        Return:
+        """
+        obs_obj_discript = "["+ ", ".join(obj_label) + "]"
+        whole_query = self.generate_query(obs_obj_discript, None, 'classify')
+
+        attempts = 0
+
+        while attempts < 5:
+            try:
+                # Query LLM to classify detected objects in 'room','entrance' and 'object' 
+                seperate_ans = self.llm.query_object_class(whole_query)
+                node_type = self.scene_graph.scene_graph_specs.keys()
+                node_type_idx = [] 
+                for node_name in node_type:
+                    temp_idx = seperate_ans.index(node_name)
+                    node_type_idx.append(temp_idx)
+                
+                node_lst = {}
+                format_test = []
+                for i, node_name in enumerate(node_type):
+                    if node_name == 'room':
+                        continue
+                    if i != (len(node_type)-1):
+                        temp_node_lst = seperate_ans[node_type_idx[i]+1:node_type_idx[i+1]]
+                    else:
+                        temp_node_lst = seperate_ans[node_type_idx[i]+1:]
+                    node_lst[node_name] =  temp_node_lst
+                    format_test += temp_node_lst
+
+                qualified_node = []
+                for item in format_test:
+                    if item != 'none':
+                        obj_name = item.split('_')[0]
+                        idx = int(item.split('_')[1])
+                        qualified_node.append(item)
+                if len(qualified_node) > 0:
+                    break
+                else:
+                    attempts += 1
+            except:
+                attempts += 1
+        return node_lst
+
+    def AddLeafNodes(self, node_lst, O_det):
+        scene_node_type = list(self.scene_graph.scene_graph_specs.keys())
+        bbox_idx_to_obj_name = {}
+        room_lst_scene_graph = self.scene_graph.get_secific_type_nodes('room')
+        all_room = [room[:room.index('_')] for room in room_lst_scene_graph]
+        O_det_mapping = {}
+        # breakpoint()
+        for node_type in scene_node_type:
+            if node_type == 'object':
+                for item in node_lst['object']:
+                    if item == 'none':
+                        continue
+                    try:
+                        if '_' in item:
+                            obj_name = item.split('_')[0]
+                            if obj_name in all_room: # if the object name is also room name, skip it. otherwise the room name may point to object node
+                                continue
+                            bb_idx = int(item.split('_')[1])
+                            sensor_dir = O_det['idx_sensordirection'][bb_idx]
+                            temp_obj = self.scene_graph.add_node("object", obj_name, {"active": True, "image": O_det['cropped_imgs'][bb_idx],"bbox": O_det['obj_bbox'][bb_idx], "cam_uuid": sensor_dir})
+                            self.scene_graph.add_edge(self.current_state, temp_obj, "contains")
+                            bbox_idx_to_obj_name[bb_idx] = temp_obj
+                    except:
+                        print(f'Scene Graph: Fail to add object item {item}')
+            elif node_type == 'entrance':
+                for item in node_lst['entrance']:
+                    if item == 'none':
+                        continue
+                    if '_' in item:
+                        entrance_name = item.split('_')[0]
+                        bb_idx = int(item.split('_')[1])
+                        if self.current_state[:-2] == entrance_name: # handle wrong entrance name, (To be deleted).
+                            continue
+                        sensor_dir = O_det['idx_sensordirection'][bb_idx] # get the sensor direction for this entrance
+                        if 'LAST' in item:
+                            temp_entrance = self.last_subgoal
+                            self.scene_graph.nodes()[temp_entrance]['image'] = O_det['cropped_imgs'][bb_idx]
+                            self.scene_graph.nodes()[temp_entrance]['bbox'] = O_det['obj_bbox'][bb_idx]
+                            self.scene_graph.nodes()[temp_entrance]['cam_uuid'] = sensor_dir
+                            self.scene_graph.nodes()[temp_entrance]['active'] = True
+                        else:
+                            temp_entrance = self.scene_graph.add_node("entrance", entrance_name, {"active": True,"image": O_det['cropped_imgs'][bb_idx],"bbox": O_det['obj_bbox'][bb_idx],"cam_uuid": sensor_dir})
+                        
+                        O_det_mapping[item] = temp_entrance
+                        self.scene_graph.add_edge(self.current_state, temp_entrance, "connects to")
+                        bbox_in_specific_dir = np.where(np.array(O_det['idx_sensordirection']) == sensor_dir)[0] # get all objects in the direction
+                        nearby_bbox_idx = self.get_nearby_bbox(O_det['obj_bbox'][bb_idx],O_det['obj_bbox'][bbox_in_specific_dir,])
+                        for idx in nearby_bbox_idx:
+                            if idx in bbox_idx_to_obj_name.keys():
+                                new_obj = bbox_idx_to_obj_name[idx] 
+                                self.scene_graph.add_edge(temp_entrance, new_obj, "is near")
+        return O_det_mapping
+        
+
+    def UpdateLeafNodes(self, node_lst, O_det, to_be_updated_nodes, to_be_updated_nodes_feat):
+        if 'entrance' not in node_lst:
+            return
+        current_entrance = []
+        current_entrance_feature = []
+
+        for item in node_lst['entrance']:
+            if item == 'none':
+                continue
+            if '_' in item:
+                entrance_name = item.split('_')[0]
+                bb_idx = int(item.split('_')[1])
+                current_entrance.append(entrance_name)
+                if self.current_state[:-2] == entrance_name: # handle wrong entrance name, (To be deleted).
+                    continue
+                sensor_dir = O_det['idx_sensordirection'][bb_idx] # get the sensor direction for this entrance
+                bbox_in_specific_dir = np.where(np.array(O_det['idx_sensordirection']) == sensor_dir)[0] # get all objects in the direction
+                nearby_bbox_idx = self.get_nearby_bbox(O_det['obj_bbox'][bb_idx],O_det['obj_bbox'][bbox_in_specific_dir,])
+                nearby_objfeats = []
+                for idx in nearby_bbox_idx:
+                    new_obj = O_det['obj_label'][idx]
+                    nearby_objfeats.append(new_obj)
+                current_entrance_feature.append(nearby_objfeats)
+
+        Updated_Nodes = []
+        if len(current_entrance) > 0:
+            print(' *** UPDATING ENTEANCE ***')
+            for i, target_node in enumerate(to_be_updated_nodes):
+                target_features = to_be_updated_nodes_feat[i]
+                whole_query = self.generate_query([target_node, target_features, current_entrance, current_entrance_feature], None, 'node_feature')
+                store_ans = []
+                for i in range(self.llm_max_query):
+                    seperate_ans = self.llm.query_node_feature(whole_query)
+                    if len(seperate_ans) > 0 and seperate_ans[0] in current_entrance:
+                        store_ans.append(seperate_ans[0])
+                    if len(store_ans)  >= self.llm_sampling_query:
+                        break
+                goal_node_name = most_common(store_ans)
+                if goal_node_name in current_entrance: # If we find a current door is similar to the important doors. Otherwise, we ignore it.
+                    self.explored_node.append(goal_node_name)
+                    # self.scene_graph.combine_node(target_node, goal_node_name)
+                    Updated_Nodes.append([target_node, goal_node_name])
+            breakpoint()
+        return Updated_Nodes   
+
+    def OSGUpdater(self, img_lang_obs):
         """
         Updates scene graph using localisation estimate from LLM, and
         observations from VLM.
@@ -468,220 +626,40 @@ class Navigator:
 
         obs_location = most_common(locations)
         obj_bbox = torch.cat(obj_bbox, dim = 0)
-
-        #obj_label = obs['object']['forward'][1] + obs['object']['left'][1] + obs['object']['right'][1] + obs['object']['rear'][1]
-        #obj_bbox = torch.cat((obs['object']['forward'][0], obs['object']['left'][0], obs['object']['right'][0], obs['object']['rear'][0]), dim=0)
-        #cropped_imgs = obs['object']['forward'][2] + obs['object']['left'][2] + obs['object']['right'][2] + obs['object']['rear'][2]
-        #obs_location = most_common([obs['location']['forward'], obs['location']['left'], obs['location']['right'], obs['location']['rear']])
-        #idx_sensordirection = ['forward' for i in range(len(obs['object']['forward'][1]))] + ['left' for i in range(len(obs['object']['left'][1]))] + ['right' for i in range(len(obs['object']['right'][1]))] + ['rear' for i in range(len(obs['object']['rear'][1]))] 
-        # Add bbox index into obj label
         obj_label = [f'{item}_{index}' for index, item in enumerate(obj_label)]
-        obs_obj_discript = "["+ ", ".join(obj_label) + "]"
-        whole_query = self.generate_query(obs_obj_discript, None, 'classify')
 
-        attempts = 0
+        O_det = {'idx_sensordirection':idx_sensordirection, 'cropped_imgs':cropped_imgs, 'obj_bbox':obj_bbox, 'obj_label':obj_label, 'obs_location':obs_location}
 
-        while attempts < 5:
-            try:
-                # Query LLM to classify detected objects in 'room','entrance' and 'object' 
-                seperate_ans = self.llm.query_object_class(whole_query)
-                node_type = self.scene_graph.scene_graph_specs.keys()
-                node_type_idx = [] 
-                for node_name in node_type:
-                    temp_idx = seperate_ans.index(node_name)
-                    node_type_idx.append(temp_idx)
-
-                # room_idx = seperate_ans.index('room')
-                # entrance_idx = seperate_ans.index('entrance')
-                # object_idx = seperate_ans.index('object')
-                
-                node_lst = {}
-                format_test = []
-                for i, node_name in enumerate(node_type):
-                    if node_name == 'room':
-                        continue
-                    if i != (len(node_type)-1):
-                        temp_node_lst = seperate_ans[node_type_idx[i]+1:node_type_idx[i+1]]
-                    else:
-                        temp_node_lst = seperate_ans[node_type_idx[i]+1:]
-                    node_lst[node_name] =  temp_node_lst
-                    format_test += temp_node_lst
-
-                # room_lst = seperate_ans[room_idx+1:entrance_idx]
-                # entrance_lst = seperate_ans[entrance_idx+1:object_idx]
-                # object_lst = seperate_ans[object_idx+1:]
-
-                # format_test = entrance_lst + object_lst
-                qualified_node = []
-                for item in format_test:
-                    if item != 'none':
-                        obj_name = item.split('_')[0]
-                        idx = int(item.split('_')[1])
-                        qualified_node.append(item)
-                if len(qualified_node) > 0:
-                    break
-                else:
-                    attempts += 1
-            except:
-                attempts += 1
-        # Estimate State
-    
-        cropped_img_lst = []
-        cleand_sensor_dir = []
-        cleaned_object_lst = []
-        to_be_updated_nodes = []
-        for obj in node_lst['object']:
-            try:
-                bb_idx = int(obj.split('_')[1])
-            except:
-                continue
-            if bb_idx < len(cropped_imgs): # in case LLM return index out of range
-                cropped_img_lst.append(cropped_imgs[bb_idx])
-                cleand_sensor_dir.append(idx_sensordirection[bb_idx])
-                cleaned_object_lst.append(obj)
-        img_lang_obs['cleaned_object'] = cleaned_object_lst
-        img_lang_obs['cleaned_object_cropped_img'] = cropped_img_lst
-        img_lang_obs['cleand_sensor_dir'] = cleand_sensor_dir
-
+        node_lst = self.ClassifyLayers(obj_label)
         print('-------------  State Estimation --------------')
-        est_state, room_description = self.estimate_state(img_lang_obs)
+        est_state, room_description = self.estimate_state(node_lst, O_det)
         print('Room Description', room_description) 
-        # Update Room Node
         print("State Estimation:", est_state)
-        if est_state != None: # The current state is already in scene graph
-            self.current_state = est_state
-            print(f'Existing node: {self.current_state}')
-            to_be_updated_nodes, to_be_updated_nodes_feat = self.scene_graph.update_node(self.current_state)
-            self.explored_node.append(self.last_subgoal) #TODO: check when we add this
-            # TODO: how we update explored node
 
-        else: # Enter a new node
+        if est_state == None:
             last_state = self.current_state
             new_node = self.scene_graph.add_node("room", obs_location, {"active": True, "image": np.random.rand(4, 4), "description": room_description})
-            # If last goal is entrance, we connect last state and current state with this entrance.
             if self.last_subgoal != None and self.scene_graph.is_type(self.last_subgoal, 'object'):
                 self.scene_graph.add_edge(self.current_state, new_node, "connects to")
-            
             self.current_state = new_node
-            
-            if self.last_subgoal != None:
-                # If last subgoal is entrance, after we pass through the entrance, we need to decide which entrance we passed through
-                if 'entrance' in self.scene_graph.scene_graph_specs.keys() and self.scene_graph.is_type(self.last_subgoal, 'entrance'):
-                    find_last_entrance = False
-                    entrance_lst = node_lst['entrance']
-                    self.scene_graph.add_edge(self.current_state, self.last_subgoal, "connects to")
-                    self.explored_node.append(self.last_subgoal)
-                    for idx, item in enumerate(entrance_lst):
-                        if '_' in item:
-                            entrance_name = item.split('_')[0]
-                            bb_idx = int(item.split('_')[1])
-                            sensor_dir = idx_sensordirection[bb_idx]
-                            #TODO: how to choose the last entrance image
-                            if sensor_dir == 'rear':
-                                entrance_lst[idx] =  'LAST' + entrance_lst[idx]
-                                find_last_entrance = True
-                                break
-                    # TODO: How to select the door just passed by
-                    trial_time = 0
-                    while (not find_last_entrance) and (trial_time < 3):
-                        idx = random.choice(range(len(entrance_lst)))
-                        trial_time += 1
-                        if '_' in entrance_lst[idx]:
-                            entrance_lst[idx] = 'LAST' + entrance_lst[idx]
-                            find_last_entrance = True
-                    if not find_last_entrance:
-                        self.scene_graph.nodes()[self.last_subgoal]['active'] = False
-                # If last subgoal is room, we directly connects two room
-                elif self.scene_graph.is_type(self.last_subgoal, 'object') and self.last_subgoal in self.scene_graph.get_related_codes(last_state,'contains'):
-                    self.scene_graph.add_edge(self.current_state, self.last_subgoal, "connects to")
-                    self.explored_node.append(self.last_subgoal)
-                else:
-                    self.explored_node.append(self.last_subgoal)
+        else:
+            self.current_state = est_state
+            to_be_updated_nodes, to_be_updated_nodes_feat = self.scene_graph.update_node(self.current_state)
+            self.explored_node.append(self.last_subgoal)
+            Updated_Nodes = self.UpdateLeafNodes(node_lst, O_det, to_be_updated_nodes, to_be_updated_nodes_feat)
+        
+        O_det_mapping = self.AddLeafNodes(node_lst, O_det)
 
-            print(f'Add new node: {self.current_state}')
-        
-        self.action_logging.write(f'[State]: {self.current_state}\n')
-        
-        room_lst_scene_graph = self.scene_graph.get_secific_type_nodes('room')
-        all_room = [room[:room.index('_')] for room in room_lst_scene_graph]
-        
-        # TODO: If the reply does not have '_', update fails.
-        bbox_idx_to_obj_name = {}
+        if est_state != None:
+            for update_pair in Updated_Nodes:
+                self.scene_graph.combine_node(update_pair[0], O_det_mapping[update_pair[1]]) #TODO: update_pair has changed the idx
 
-        # TODO: hierarchical structure?
-        scene_node_type = list(self.scene_graph.scene_graph_specs.keys())
-        if 'entrance' in scene_node_type:
-            scene_node_type.remove('entrance')
-            scene_node_type = ['entrance'] + scene_node_type
-        if 'object' in scene_node_type:
-            scene_node_type.remove('object')
-            scene_node_type = ['object'] + scene_node_type
-        breakpoint()
-        for node_type in scene_node_type:
-            if node_type == 'room':
-                continue
-            elif node_type == 'object':
-                for item in node_lst['object']:
-                    if item == 'none':
-                        continue
-                    try:
-                        if '_' in item:
-                            obj_name = item.split('_')[0]
-                            if obj_name in all_room: # if the object name is also room name, skip it. otherwise the room name may point to object node
-                                continue
-                            bb_idx = int(item.split('_')[1])
-                            sensor_dir = idx_sensordirection[bb_idx]
-                            temp_obj = self.scene_graph.add_node("object", obj_name, {"active": True, "image": cropped_imgs[bb_idx],"bbox": obj_bbox[bb_idx], "cam_uuid": sensor_dir})
-                            self.scene_graph.add_edge(self.current_state, temp_obj, "contains")
-                            bbox_idx_to_obj_name[bb_idx] = temp_obj
-                    except:
-                        print(f'Scene Graph: Fail to add object item {item}')
-            elif node_type == 'entrance':
-                for item in node_lst['entrance']:
-                    if item == 'none':
-                        continue
-                    if '_' in item:
-                        entrance_name = item.split('_')[0]
-                        bb_idx = int(item.split('_')[1])
-                        
-                        if self.current_state[:-2] == entrance_name: # handle wrong entrance name, (To be deleted).
-                            continue
-                        sensor_dir = idx_sensordirection[bb_idx] # get the sensor direction for this entrance
-                        if 'LAST' in item:
-                            temp_entrance = self.last_subgoal
-                            self.scene_graph.nodes()[temp_entrance]['image'] = cropped_imgs[bb_idx]
-                            self.scene_graph.nodes()[temp_entrance]['bbox'] = obj_bbox[bb_idx]
-                            self.scene_graph.nodes()[temp_entrance]['cam_uuid'] = sensor_dir
-                            self.scene_graph.nodes()[temp_entrance]['active'] = True
-                        else:
-                            temp_entrance = self.scene_graph.add_node("entrance", entrance_name, {"active": True,"image": cropped_imgs[bb_idx],"bbox": obj_bbox[bb_idx],"cam_uuid": sensor_dir})
-                        self.scene_graph.add_edge(self.current_state, temp_entrance, "connects to")
-                        bbox_in_specific_dir = np.where(np.array(idx_sensordirection) == sensor_dir)[0] # get all objects in the direction
-                        nearby_bbox_idx = self.get_nearby_bbox(obj_bbox[bb_idx],obj_bbox[bbox_in_specific_dir,])
-                        for idx in nearby_bbox_idx:
-                            if idx in bbox_idx_to_obj_name.keys():
-                                new_obj = bbox_idx_to_obj_name[idx] 
-                                self.scene_graph.add_edge(temp_entrance, new_obj, "is near")
-        # Only when we are still in the same node, we need to update the features of doors.
-        if len(to_be_updated_nodes) > 0:
-            current_entrance = self.scene_graph.get_related_codes(self.current_state,'connects to')
-            if len(current_entrance) > 0:
-                print(' *** UPDATING ENTEANCE ***')
-                current_entrance_feature = [self.scene_graph.get_related_codes(node,'is near') for node in current_entrance]
-                for i, target_node in enumerate(to_be_updated_nodes):
-                    target_features = to_be_updated_nodes_feat[i]
-                    whole_query = self.generate_query([target_node, target_features, current_entrance, current_entrance_feature], None, 'node_feature')
-                    store_ans = []
-                    for i in range(self.llm_max_query):
-                        seperate_ans = self.llm.query_node_feature(whole_query)
-                        if len(seperate_ans) > 0 and seperate_ans[0] in current_entrance:
-                            store_ans.append(seperate_ans[0])
-                        if len(store_ans)  >= self.llm_sampling_query:
-                            break
-                    goal_node_name = most_common(store_ans)
-                    if goal_node_name in current_entrance: # If we find a current door is similar to the important doors. Otherwise, we ignore it.
-                        self.explored_node.append(goal_node_name)
-                        self.scene_graph.combine_node(target_node, goal_node_name)
+        # TODO: Regison Abstraction Update
+        ####
+        ####
+        ####
+        ####
+        ####
         return est_state
 
 
@@ -996,7 +974,7 @@ class Navigator:
             return potential_next_pos, potential_cam_uuid
 
         # Update
-        self.update_scene_graph(img_lang_obs)
+        self.OSGUpdater(img_lang_obs)
         print('------------  Update Scene Graph   -------------')
         scene_graph_str = self.scene_graph.print_scene_graph(pretty=False,skip_object=False)
         self.action_logging.write(f'Scene Graph: {scene_graph_str}\n')
