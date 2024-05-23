@@ -506,7 +506,6 @@ class Navigator:
         room_lst_scene_graph = self.scene_graph.get_secific_type_nodes('room')
         all_room = [room[:room.index('_')] for room in room_lst_scene_graph]
         O_det_mapping = {}
-        # breakpoint()
         for node_type in scene_node_type:
             if node_type == 'object':
                 for item in node_lst['object']:
@@ -596,7 +595,6 @@ class Navigator:
                     self.explored_node.append(goal_node_name)
                     # self.scene_graph.combine_node(target_node, goal_node_name)
                     Updated_Nodes.append([target_node, goal_node_name])
-            breakpoint()
         return Updated_Nodes   
 
     def OSGUpdater(self, img_lang_obs):
@@ -652,7 +650,7 @@ class Navigator:
 
         if est_state != None:
             for update_pair in Updated_Nodes:
-                self.scene_graph.combine_node(update_pair[0], O_det_mapping[update_pair[1]]) #TODO: update_pair has changed the idx
+                self.scene_graph.combine_node(update_pair[0], O_det_mapping[update_pair[1]])
 
         # TODO: Regison Abstraction Update
         ####
@@ -755,7 +753,7 @@ class Navigator:
             self.last_subgoal = path[0]
         self.path = path
         
-        if self.scene_graph.is_type(self.last_subgoal, 'room'): #TODO: add local exploration here
+        if self.scene_graph.is_type(self.last_subgoal, 'room'):
             # self.last_subgoal = random.choice(self.scene_graph.get_related_codes(self.last_subgoal, 'contains'))
 
             obj_lst = self.scene_graph.get_related_codes(self.current_state, 'contains')
