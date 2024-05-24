@@ -595,6 +595,7 @@ class Navigator:
                     self.explored_node.append(goal_node_name)
                     # self.scene_graph.combine_node(target_node, goal_node_name)
                     Updated_Nodes.append([target_node, goal_node_name])
+
         return Updated_Nodes   
 
     def OSGUpdater(self, img_lang_obs):
@@ -650,9 +651,9 @@ class Navigator:
 
         if est_state != None:
             for update_pair in Updated_Nodes:
-                self.scene_graph.combine_node(update_pair[0], O_det_mapping[update_pair[1]])
+                self.scene_graph.combine_node(update_pair[0], O_det_mapping[update_pair[1]]) #TODO: update_pair has changed the idx
 
-        # TODO: Regison Abstraction Update
+        # TODO: Region Abstraction Update
         ####
         ####
         ####
@@ -661,20 +662,41 @@ class Navigator:
         return est_state
 
 
-    def plan_path(self, goal):
-        '''
-        Plan based on Scene graph
-        Input:
-            goal: string, target object
-        Return:
-            plan: list of node name from current state to goal state;
-                  if already in the goal room, return object list that is most likely near goal
-        '''
-
-        ########### Begin Query LLM for Plan #################
-        print('goal', goal)
+    def GoalProposer(self):
+        # Start exploration in current state
+        self.explored_node.append(self.current_state)
+        obj_lst = self.scene_graph.get_related_codes(self.current_state, 'contains', active_flag = True)
+        cleaned_obj_lst = obj_lst.copy()
+        for obj in obj_lst:
+            if obj in self.explored_node:
+                obj_name = obj[:obj.index('_')]
+                cleaned_obj_lst = [element for element in cleaned_obj_lst if not element.startswith(obj_name)]
+        sg_obj_Discript = "["+ ", ".join(cleaned_obj_lst) + "]"
+        whole_query = self.generate_query(sg_obj_Discript, self.goal, 'local')
+        
         store_ans = []
+        nodes_in_view = self.scene_graph.nodes(active_flag=True)
 
+        for i in range(self.llm_max_query):
+            seperate_ans = self.llm.query_local_explore(whole_query)
+            print(seperate_ans)
+            if len(seperate_ans) > 0:
+                if seperate_ans[0] in nodes_in_view:
+                    store_ans.append(seperate_ans[0])
+                elif seperate_ans[-1] in nodes_in_view:
+                        store_ans.append(seperate_ans[-1])
+            if len(store_ans)  >= self.llm_sampling_query:
+                break
+        
+        goal_node_name = most_common(store_ans)
+        if goal_node_name == None:
+            goal_node_name = random.choice(obj_lst)
+        
+        path = [goal_node_name]
+        return path
+
+    def RegionProposer(self):
+        store_ans = []
         obj_lst_scene_graph = self.scene_graph.get_secific_type_nodes('object')
         for obj in obj_lst_scene_graph:
             if self.check_goal(obj):
@@ -682,7 +704,7 @@ class Navigator:
                 return self.path
 
         Scene_Discript = self.scene_graph.print_scene_graph(selected_node = self.current_state, pretty=False, skip_object=True)
-        whole_query = self.generate_query(Scene_Discript, goal, 'plan')
+        whole_query = self.generate_query(Scene_Discript, self.goal, 'plan')
 
         for i in range(self.llm_max_query):
             seperate_ans = self.llm.query(whole_query)
@@ -694,97 +716,26 @@ class Navigator:
         # use whole lopp to choose the most common goal name that is in the scene graph
         print('[PLAN INFO] Receving Ans from LLM:', store_ans)
 
-        store_ans_copy = store_ans.copy()
         goal_node_name = most_common(store_ans)
 
         # If no valid goal node, we explore the current state by default.
         if goal_node_name == None:
             goal_node_name = self.current_state
+        
+        return goal_node_name 
 
-        print(f'[PLAN INFO] current state:{self.current_state}, goal state:{goal_node_name}')
-
-        ########### End Query LLM for Plan #################
-
+    def PathFinder(self, start, end):
         try:
-            if self.scene_graph.has_path(self.current_state, goal_node_name):
-                path = self.scene_graph.plan_shortest_paths(self.current_state, goal_node_name)
+            if self.scene_graph.has_path(start, end):
+                path = self.scene_graph.plan_shortest_paths(start, end)
             else:
-                path = [self.current_state]
+                path = [start]
         except:
-            path = [self.current_state]
-            self.action_logging.write(f'[ERROR] Cannot Find a path between {self.current_state} and {goal_node_name}')
-
-        # If we are already in the target room, Start local exploration in the room
-        if path[-1] == self.current_state:
-            self.explored_node.append(self.current_state)
-            obj_lst = self.scene_graph.get_related_codes(self.current_state, 'contains', active_flag = True)
-            cleaned_obj_lst = obj_lst.copy()
-            for obj in obj_lst:
-                if obj in self.explored_node:
-                    obj_name = obj[:obj.index('_')]
-                    cleaned_obj_lst = [element for element in cleaned_obj_lst if not element.startswith(obj_name)]
-            sg_obj_Discript = "["+ ", ".join(cleaned_obj_lst) + "]"
-            whole_query = self.generate_query(sg_obj_Discript, goal, 'local')
-            
-            store_ans = []
-            nodes_in_view = self.scene_graph.nodes(active_flag=True)
-
-            for i in range(self.llm_max_query):
-                seperate_ans = self.llm.query_local_explore(whole_query)
-                print(seperate_ans)
-                if len(seperate_ans) > 0:
-                    if seperate_ans[0] in nodes_in_view:
-                        store_ans.append(seperate_ans[0])
-                    elif seperate_ans[-1] in nodes_in_view:
-                         store_ans.append(seperate_ans[-1])
-                if len(store_ans)  >= self.llm_sampling_query:
-                    break
-            
-            goal_node_name = most_common(store_ans)
-            if goal_node_name == None:
-                goal_node_name = random.choice(obj_lst)
-            
-            path = [goal_node_name]
-        
-        # if next subgoal is entrance, we mark it.
-        if len(path) > 1:
-            self.last_subgoal = path[1]
-        else:
-            self.last_subgoal = path[0]
-        self.path = path
-        
-        if self.scene_graph.is_type(self.last_subgoal, 'room'):
-            # self.last_subgoal = random.choice(self.scene_graph.get_related_codes(self.last_subgoal, 'contains'))
-
-            obj_lst = self.scene_graph.get_related_codes(self.current_state, 'contains')
-            sg_obj_Discript = "["+ ", ".join(obj_lst) + "]"
-            whole_query = self.generate_query(sg_obj_Discript, self.last_subgoal, 'local')
-            
-            store_ans = []
-            nodes_in_view = self.scene_graph.nodes(active_flag=True)
-
-            for i in range(self.llm_max_query):
-                seperate_ans = self.llm.query_local_explore(whole_query)
-                print(seperate_ans)
-                if len(seperate_ans) > 0:
-                    if seperate_ans[0] in nodes_in_view:
-                        store_ans.append(seperate_ans[0])
-                    elif seperate_ans[-1] in nodes_in_view:
-                         store_ans.append(seperate_ans[-1])
-                if len(store_ans)  >= self.llm_sampling_query:
-                    break
-
-            goal_node_name = most_common(store_ans)
-            if goal_node_name == None:
-                goal_node_name = random.choice(obj_lst)
-
-            self.last_subgoal = goal_node_name
-            path = [goal_node_name]
-            self.path = path
-        
-        self.action_logging.write(f'[PLAN INFO] Path:{self.path}\n')
-        self.action_logging.write(f'[Last Subgoal] Path:{self.last_subgoal}\n')
-        
+            path = [start]
+            self.action_logging.write(f'[ERROR] Cannot Find a path between {start} and {end}')
+        return path
+    
+    def InvalidCheck(self):
         if len(self.explored_node) > 2:
             if self.scene_graph.is_type(self.last_subgoal, 'object'):
                 all_obj = self.scene_graph.get_related_codes(self.current_state, 'contains', active_flag = False)
@@ -819,6 +770,40 @@ class Navigator:
                 if len(active_obj) > 0:
                     self.last_subgoal = random.choice(active_obj)
                     self.action_logging.write(f'[Error in Explored Node]: select active object, random choose {self.last_subgoal}\n')
+
+    def Planner(self):
+        '''
+        Plan based on Scene graph
+        Input:
+            goal: string, target object
+        Return:
+            plan: list of node name from current state to goal state;
+                  if already in the goal room, return object list that is most likely near goal
+        '''
+
+        print('goal', self.goal)
+
+        target_place = self.RegionProposer()
+
+        print(f'[PLAN INFO] current state:{self.current_state}, goal state:{target_place}')
+
+        path = self.PathFinder(self.current_state, target_place)
+
+        # If we are already in the target room, Start local exploration in the room
+        if len(path) == 1 or path[-1] == self.current_state:
+            self.last_subgoal = path[0]
+            if self.scene_graph.is_type(self.last_subgoal, 'room'): #TODO: add local exploration here
+                path = self.GoalProposer()
+                self.last_subgoal = path[0]
+        else:
+            self.last_subgoal = path[1]
+        
+        self.path = path
+        self.action_logging.write(f'[PLAN INFO] Path:{self.path}\n')
+        self.action_logging.write(f'[Last Subgoal] Path:{self.last_subgoal}\n')
+        
+        self.InvalidCheck()
+
         print(f'[Last Subgoal] Path:{self.last_subgoal}')
         self.action_logging.write(f'[Last Subgoal (Active)] Path:{self.last_subgoal}\n')
         self.action_logging.write(f'[Explored Node]:{self.explored_node}\n')
@@ -980,7 +965,7 @@ class Navigator:
 
         # Plan
         print('-------------  Plan Path --------------')
-        path = self.plan_path(self.goal)
+        path = self.Planner()
         self.is_navigating = True
         next_goal, next_position, cam_uuid = self.ground_plan_to_bbox()
         self.action_logging.write(f'Path: {path}, Next Goal: {next_goal}\n')
