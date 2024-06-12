@@ -58,18 +58,23 @@ Folder structure:
 │   │   │   │   ├── val.json.gz
 │   ├── gibson
 │   │   │   ├── v1.1
-│   │   │   │   ├── train
 │   │   │   │   ├── val
 │   │   │   │   │   ├── content
 │   │   │   │   │   ├── val.json.gz
 │   │   │   │   │   ├── val_info.pbz2
-│   ...
-│   ├── logs
-└── └──  ├── <name_of_trajN>
-    	    ├── 0.jpg
-    	    ├── 1.jpg
-    	    ├── ...
-            ├── action.txt
-            └── query.log
+├── checkpoints
+│   ├── groundingdino_swint_ogc.pth
+│   ├── ram_swin_large_14m.pth
+├── configs
+│   ├── gpt_config.yaml
+│   ├── ...
+├── ...
+└── logs
+    └──  <name_of_trajN>
+    	├── 0.jpg
+    	├── 1.jpg
+    	├── ...
+        ├── action.txt
+        └── query.log
 
 ```
