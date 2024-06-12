@@ -189,7 +189,7 @@ class SceneGraph:
         """
         raise NotImplementedError
 
-    def print_scene_graph(self, selected_node=None, json_flag=True, pretty=False, skip_object=True, active_flag = True):
+    def print_scene_graph(self, selected_node=None, json_flag=True, pretty=False, skip_object=True, active_flag = True, level = None):
         """
         Prints the scene graph as a dict or JSON string. It represents the scene graph
         using the standard format below, which is also used for loading graphs.
@@ -221,6 +221,11 @@ class SceneGraph:
         sg_dict = {}
         if selected_node != None:
             sub_graph = nx.subgraph(self.scene_graph, nx.node_connected_component(self.scene_graph, selected_node))
+            if level is not None:
+                sub_graph = nx.subgraph(sub_graph, set(nx.bfs_tree(sub_graph, level).nodes))
+            temp_scene_graph = sub_graph.copy()
+        elif level is not None:
+            sub_graph = nx.subgraph(sub_graph, set(nx.bfs_tree(sub_graph, level).nodes))
             temp_scene_graph = sub_graph.copy()
         else:
             temp_scene_graph =  self.scene_graph.copy()

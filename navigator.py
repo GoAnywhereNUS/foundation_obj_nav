@@ -44,6 +44,18 @@ class Navigator:
         self.scene_graph_specs = scene_graph_specs
         self.scene_graph = SceneGraph(scene_graph_specs)
         scene_graph_specs_dict = json.loads(scene_graph_specs)
+
+        self.region_layer_order = []
+        for layer in scene_graph_specs_dict.keys():
+            if layer == 'object' or layer == 'state':
+                continue
+            if "contains" in scene_graph_specs_dict[layer].keys():
+                self.region_layer_order.append(layer)
+                for sublayer in scene_graph_specs_dict[layer]['contains']:
+                    if sublayer not in self.region_layer_order and sublayer != 'object':
+                        self.region_layer_order.append(sublayer)
+
+
         self.state_spec = scene_graph_specs_dict["state"]
         self.current_state = {node_type: None for node_type in self.state_spec}
 
@@ -211,36 +223,6 @@ class Navigator:
                 return True
         return False 
 
-
-        # if self.goal == 'sofa' or self.goal == 'couch':
-        #     if 'couch' in label or 'sofa' in label:
-        #         return True
-        #     elif 'armchair' in label:
-        #         return True
-        #     else:
-        #         return self.goal in label
-        # if self.goal == 'bed':
-        #     return self.goal == label
-        # if self.goal == 'toilet':
-        #     if 'toilet' in label and 'seat' in label:
-        #         return True
-        #     elif 'toilet' in label and 'bowl' in label:
-        #         return True
-        #     else:
-        #         return self.goal == label
-        # if self.goal == 'plant':
-        #     if label == 'ornamental plant':
-        #         return False
-        #     else:
-        #         return self.goal in label
-        # if self.goal == 'tv':
-        #     if 'television' in label:
-        #         return True
-        #     else:
-        #         return self.goal in label
-        # else:
-        #     return self.goal in label
-
     def perceive(self, images):
         image_locations = {}
         image_objects = {}
@@ -337,10 +319,10 @@ class Navigator:
         # TODO: Implement some reasonable fusion across all images
         return obs_location
 
-    def generate_query(self, discript, goal, query_type):
+    def generate_query(self, discript, goal, query_type, region = None):
         if query_type == 'plan':
             start_question = "You see the partial layout of the apartment:\n"
-            end_question = f"\nQuestion: Your goal is to find a {goal}. If any of the rooms in the layout are likely to contain the target object, reply the most probable room name, not any door name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found. Follow my format to state reasoning and answer. Please only use one word in answer."
+            end_question = f"\nQuestion: Your goal is to find a {goal}. If any of the {region} in the layout are likely to contain the target object, reply the most probable {region} name, not any door name. If all the {region} are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found. Follow my format to state reasoning and answer. Please only use one word in answer."
             explored_item_list = [x for x in self.explored_node if isinstance(x, str)]
             explored_query = "The following has been explored: " + "["+ ", ".join(list(set(explored_item_list))) + "]. Please dont reply explored place or object."
             whole_query = start_question + discript + end_question + explored_query
@@ -379,6 +361,8 @@ class Navigator:
             start_question = "There is a list:"
             end_question = f"Please check whether {goal} is in the list. Please reply the object with its index. Always follow the format: Answer: <your answer>."
             whole_query = start_question + discript + end_question
+        elif query_type == 'region_update':
+            whole_query = f"Previously, we were in the {discript['lastregion']}, and we move towards {goal}. Now we arrive in a {discript['currentregion']}. Do you think the current state {discript['currentregion']} belongs to any of the existing region abstractions: {discript['allregion']}?  If it belongs to any other existing region abstraction, return the region abstraction name; otherwise propose the name for this new section formatted as \"<name> Section (New)\". Ensure that your response follows the format: Reasoning: <your reasoning>. Answer: <your answer>"
         return whole_query
 
     def estimate_state(self, node_lst, O_det):
@@ -636,10 +620,16 @@ class Navigator:
         print("State Estimation:", est_state)
 
         if est_state == None:
-            last_state = self.current_state
+
             new_node = self.scene_graph.add_node("room", obs_location, {"active": True, "image": np.random.rand(4, 4), "description": room_description})
-            if self.last_subgoal != None and self.scene_graph.is_type(self.last_subgoal, 'object'):
-                self.scene_graph.add_edge(self.current_state, new_node, "connects to")
+            
+            # TODO: Region Abstraction Update
+
+            if self.last_subgoal != None:
+                if self.scene_graph.is_type(self.last_subgoal, 'object'):
+                    self.scene_graph.add_edge(self.current_state, new_node, "connects to")
+                elif self.scene_graph.is_type(self.last_subgoal, 'entrance'):
+                     self.scene_graph.add_edge(new_node, self.last_subgoal, "connects to")
             self.current_state = new_node
         else:
             self.current_state = est_state
@@ -651,18 +641,12 @@ class Navigator:
 
         if est_state != None:
             for update_pair in Updated_Nodes:
-                self.scene_graph.combine_node(update_pair[0], O_det_mapping[update_pair[1]]) #TODO: update_pair has changed the idx
+                self.scene_graph.combine_node(update_pair[0], O_det_mapping[update_pair[1]])
 
-        # TODO: Region Abstraction Update
-        ####
-        ####
-        ####
-        ####
-        ####
         return est_state
 
 
-    def GoalProposer(self):
+    def GoalProposer(self, target):
         # Start exploration in current state
         self.explored_node.append(self.current_state)
         obj_lst = self.scene_graph.get_related_codes(self.current_state, 'contains', active_flag = True)
@@ -672,7 +656,7 @@ class Navigator:
                 obj_name = obj[:obj.index('_')]
                 cleaned_obj_lst = [element for element in cleaned_obj_lst if not element.startswith(obj_name)]
         sg_obj_Discript = "["+ ", ".join(cleaned_obj_lst) + "]"
-        whole_query = self.generate_query(sg_obj_Discript, self.goal, 'local')
+        whole_query = self.generate_query(sg_obj_Discript, target, 'local')
         
         store_ans = []
         nodes_in_view = self.scene_graph.nodes(active_flag=True)
@@ -703,20 +687,27 @@ class Navigator:
                 self.path = [obj]
                 return self.path
 
-        Scene_Discript = self.scene_graph.print_scene_graph(selected_node = self.current_state, pretty=False, skip_object=True)
-        whole_query = self.generate_query(Scene_Discript, self.goal, 'plan')
+        current_region = None
+        # Scene_Discript = self.scene_graph.print_scene_graph(selected_node = self.current_state, pretty=False, skip_object=True)
+        for region_layer in self.region_layer_order:
+            try:
+                Scene_Discript = self.scene_graph.print_scene_graph(selected_node = self.current_state, level = current_region, pretty=False, skip_object=True)
+            except:
+                Scene_Discript = self.scene_graph.print_scene_graph(selected_node = self.current_state, pretty=False, skip_object=True)
+            
+            whole_query = self.generate_query(Scene_Discript, self.goal, 'plan', region = region_layer)
+            for i in range(self.llm_max_query):
+                seperate_ans = self.llm.query(whole_query)
+                if len(seperate_ans) > 0 and seperate_ans[0] in self.scene_graph.nodes():
+                    store_ans.append(seperate_ans[0])
+                if len(store_ans)  >= self.llm_sampling_query:
+                    break
+            
+            # use whole lopp to choose the most common goal name that is in the scene graph
+            print('[PLAN INFO] Receving Ans from LLM:', store_ans)
 
-        for i in range(self.llm_max_query):
-            seperate_ans = self.llm.query(whole_query)
-            if len(seperate_ans) > 0 and seperate_ans[0] in self.scene_graph.nodes():
-                store_ans.append(seperate_ans[0])
-            if len(store_ans)  >= self.llm_sampling_query:
-                break
-        
-        # use whole lopp to choose the most common goal name that is in the scene graph
-        print('[PLAN INFO] Receving Ans from LLM:', store_ans)
-
-        goal_node_name = most_common(store_ans)
+            goal_node_name = most_common(store_ans)
+            current_region = goal_node_name
 
         # If no valid goal node, we explore the current state by default.
         if goal_node_name == None:
@@ -792,11 +783,14 @@ class Navigator:
         # If we are already in the target room, Start local exploration in the room
         if len(path) == 1 or path[-1] == self.current_state:
             self.last_subgoal = path[0]
-            if self.scene_graph.is_type(self.last_subgoal, 'room'): #TODO: add local exploration here
-                path = self.GoalProposer()
+            if self.scene_graph.is_type(self.last_subgoal, 'room'): 
+                path = self.GoalProposer(self.goal)
                 self.last_subgoal = path[0]
         else:
             self.last_subgoal = path[1]
+            if self.scene_graph.is_type(self.last_subgoal, 'room'):
+                path = self.GoalProposer(self.last_subgoal)
+                self.last_subgoal = path[0]
         
         self.path = path
         self.action_logging.write(f'[PLAN INFO] Path:{self.path}\n')
@@ -985,15 +979,6 @@ class Navigator:
             self.visualise_objects(obs, img_lang_obs)
             self.visualise_chosen_goal(obs, next_position, next_goal, cam_uuid)
 
-        if len(path) > 1:
-            next_goal = path[1]
-        else:
-            next_goal = path[0]
-    
-        if len(path) > 1:
-            next_goal = path[1]
-        else:
-            next_goal = path[0]
         return next_position, cam_uuid 
 
     def run(self):
