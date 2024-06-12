@@ -47,3 +47,29 @@ To run tests in habitat:
 ```
 python navigate_homerobot.py
 ```
+
+Folder structure:
+
+```
+├── data
+│   ├── hm3d
+│   │   │   ├── val
+│   │   │   │   ├── content
+│   │   │   │   ├── val.json.gz
+│   ├── gibson
+│   │   │   ├── v1.1
+│   │   │   │   ├── train
+│   │   │   │   ├── val
+│   │   │   │   │   ├── content
+│   │   │   │   │   ├── val.json.gz
+│   │   │   │   │   ├── val_info.pbz2
+│   ...
+│   ├── logs
+└── └──  ├── <name_of_trajN>
+    	    ├── 0.jpg
+    	    ├── 1.jpg
+    	    ├── ...
+            ├── action.txt
+            └── query.log
+
+```
