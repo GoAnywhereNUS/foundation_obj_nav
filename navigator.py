@@ -361,8 +361,8 @@ class Navigator:
             start_question = "There is a list:"
             end_question = f"Please check whether {goal} is in the list. Please reply the object with its index. Always follow the format: Answer: <your answer>."
             whole_query = start_question + discript + end_question
-        elif query_type == 'region_update':
-            whole_query = f"Previously, we were in the {discript['lastregion']}, and we move towards {goal}. Now we arrive in a {discript['currentregion']}. Do you think the current state {discript['currentregion']} belongs to any of the existing region abstractions: {discript['allregion']}?  If it belongs to any other existing region abstraction, return the region abstraction name; otherwise propose the name for this new section formatted as \"<name> Section (New)\". Ensure that your response follows the format: Reasoning: <your reasoning>. Answer: <your answer>"
+        elif query_type == 'region':
+            whole_query = f"Previously, we were in the {discript['last_region']}, and we move towards {goal}. Now we arrive in a {discript['current_region']}. Do you think the current state {discript['current_region']} belongs to any of the existing region abstractions: {discript['all_region']}?  If it belongs to any other existing region abstraction, return the region abstraction name; otherwise propose the name for this new region formatted as \"<name> Section (New)\". Ensure that your response follows the format: Reasoning: <your reasoning>. Answer: <your answer>"
         return whole_query
 
     def estimate_state(self, node_lst, O_det):
@@ -405,8 +405,6 @@ class Navigator:
             room_descript[direction] = []
         for i, label in enumerate(obj_label_descript):
             room_descript[cleand_sensor_dir[i]].append(label)
-
-        # TODO: add weight on differentt direction based on object num in each direction
             
         room_lst_scene_graph = self.scene_graph.get_secific_type_nodes('room')
         all_room = [room[:room.index('_')] for room in room_lst_scene_graph]
@@ -593,8 +591,6 @@ class Navigator:
             state: agent's current state as dict, e.g. {'floor': xxx, 'room': xxx, ...}
         """
 
-        # TODO: Need panaromic view to estimate state
-        
         obj_label = []
         cropped_imgs = []
         locations = []
@@ -620,10 +616,18 @@ class Navigator:
         print("State Estimation:", est_state)
 
         if est_state == None:
-
+               
             new_node = self.scene_graph.add_node("room", obs_location, {"active": True, "image": np.random.rand(4, 4), "description": room_description})
             
-            # TODO: Region Abstraction Update
+            # Update regions
+            new_region_node = None
+            if len(self.region_layer_order) > 1:
+                for region_layer in self.region_layer_order[:-1]:
+                    temp_new_region_node = self.scene_graph.add_node(region_layer, obs_location, {"active": True, "image": np.random.rand(4, 4)})
+                    if new_region_node != None:
+                         self.scene_graph.add_edge(new_region_node, temp_new_region_node, "contains")
+                         new_region_node = temp_new_region_node
+                self.scene_graph.add_edge(new_region_node, new_node, "contains")
 
             if self.last_subgoal != None:
                 if self.scene_graph.is_type(self.last_subgoal, 'object'):
