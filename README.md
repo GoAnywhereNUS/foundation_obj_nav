@@ -1,33 +1,61 @@
 # foundation_obj_nav
 Object goal navigation with foundation models
 
-## Installation
-Add the submodules to the project:
+## Installation (Simulation evaluations)
+### OpenSearch setup
+Create a conda environment (tested with Python 3.9).
 ```
-git submodule update --init --recursive
-``````
-
-Install LAVIS:
-
+conda create -n nav python=3.9 && \
+conda activate nav
 ```
-pip install salesforce-lavis
+Install torch and torchvision (tested with PyTorch 2.3.1, using CUDA 11.8 libraries).
 ```
-
-Install GroundingDINO (run inside Grounded-Segment-Anything):
-
+conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
+```
+Add Grounded-Segment-Anything submodule and required nested submodules to project.
+```
+git submodule update --init Grounded-Segment-Anything && \
+cd Grounded-Segment-Anything && \
+git submodule update --init Tag2Text
+```
+Install LAVIS for BLIP-2 and openai for GPT-3.5.
+```
+pip install salesforce-lavis && pip install openai
+```
+Install GroundingDINO.
 ```
 python -m pip install -e GroundingDINO
 ```
-
-Install the requirements for Tag2Text (run inside Grounded-Segment-Anything):
-
+Install Tag2Text.
 ```
 cd Tag2Text && pip install -r requirements.txt
 ```
-
-To get the baselines or sim setup running, you may need to install the `home_robot` package:
+Change transformers back to original 4.26.1 version if it has been changed by Tag2Text.
+```
+pip install transformers==4.26.1
+```
+### Habitat simulation setup
+Start install from root of repository.
+Install torch_cluster (to pre-empt version conflicts if auto-installed by requirements later). Also install torch_geometric.
+```
+conda install pytorch-cluster -c pyg && pip install torch_geometric
+```
+Install habitat_sim (requires version 0.2.5)
+```
+conda install habitat-sim=0.2.5 withbullet headless -c conda-forge -c aihabitat
+```
+Install home_robot.
 ```
 cd home-robot/src/home_robot && pip install -e .
+```
+Install home_robot_sim.
+```
+cd ../home_robot_sim && pip install -e .
+```
+Follow steps 2, 3 to install other dependencies required: https://github.com/facebookresearch/home-robot/tree/main/src/home_robot_sim.
+Lastly, install scikit-fmm, if it has not yet been installed.
+```
+pip install scikit-fmm
 ```
 
 Create folder to download checkpoints into, i.e. `mkdir checkpoints && cd checkpoints/`:
@@ -37,10 +65,8 @@ Create folder to download checkpoints into, i.e. `mkdir checkpoints && cd checkp
 
 *NOTE*: No environment setup prepared yet. When manually creating a Python environment, ensure that `transformers==4.26.1`. Older or newer version of `transformers` may cause various issues. To runn LLAVA, `transformers==4.31.0` is required.
 
-*NOTE*: Several issues may be encountered while attempting to install and run `home_robot`:
+*NOTE*: Possible issues encountered with `home_robot`:
 - Failure to build `sophuspy`. Recommended resolution is to download and build `pybind11`, then use it to build `sophuspy` wheels: https://github.com/craigstar/SophusPy/issues/3.
-- Missing dependency on `pytorch3d`. Recommended resolution is to build it from source, using the provided CUB library tar file. More details at: https://github.com/facebookresearch/pytorch3d/blob/3b4f8a4980e889936650e6841c6861ac45ed1117/INSTALL.md
-- Missing dependency on `torch_geometric`. Recommended resolution is to `pip install torch_geometric`.
 
 To run tests in habitat:
 
