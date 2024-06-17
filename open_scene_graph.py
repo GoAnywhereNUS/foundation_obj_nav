@@ -41,7 +41,7 @@ default_scene_graph_specs = """
 
 ############### Meta-structure #############
 
-class OSGMetaStructure:
+class OSGMetaStructure(type):
     """
     Meta-structure describes the minimal data and allowable
     structure of an OSG.
@@ -210,34 +210,34 @@ class OSGSpec(OSGMetaStructure):
 
         # Validate and store the spec in queryable form
         OSGMetaStructure.validate(spec)
-        self.class_view = spec
-        self.layer_view = OSGMetaStructure.getLayerView(spec)
+        self._class_view = spec
+        self._layer_view = OSGMetaStructure.getLayerView(spec)
 
         # Create node templates (i.e. node atts) by updating
         # the defaults in meta-structure with the additional 
         # attributes in the spec
-        self.node_attrs = dict()
-        for cls, values in self.class_view.items():
+        self._node_attrs = dict()
+        for cls, values in self._class_view.items():
             if cls != "state":
                 attrs = OSGMetaStructure.node_templates[values["layer_type"]]
                 if "attrs" in values:
                     attrs.update(values["attrs"]) # Not yet implemented in specs
-                self.node_attrs[cls] = attrs
+                self._node_attrs[cls] = attrs
 
     def getNodeTemplate(self, node_class):
-        if node_class not in self.node_attrs.keys():
+        if node_class not in self._node_attrs.keys():
             raise Exception("Invalid node type")
         attrs = {
             attr: attr_type()
-            for attr, attr_type in self.node_attrs[node_class].items()
+            for attr, attr_type in self._node_attrs[node_class].items()
         }
         return attrs
     
     def getClassSpec(self, node_cls):
-        return self.class_view[node_cls]
+        return self._class_view[node_cls]
     
     def getLayerClasses(self, layer_id):
-        return self.layer_view[layer_id]
+        return self._layer_view[layer_id]
 
 
 class OpenSceneGraph:  
@@ -285,6 +285,9 @@ class OpenSceneGraph:
                 node.label == label)
         ]
         return sum(instances) + 1 # 1-indexed
+    
+    def getSpec(self):
+        return self.spec
     
 
 if __name__ == "__main__":
