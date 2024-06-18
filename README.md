@@ -58,26 +58,21 @@ Lastly, install scikit-fmm, if it has not yet been installed.
 pip install scikit-fmm
 ```
 
-Create folder to download checkpoints into, i.e. `mkdir checkpoints && cd checkpoints/`:
+Notes:
+- `transformers==4.26.1` is required for packages to work together. Note that running LLaVa requires `transformers==4.31.0`.
+- If there are issues building `sophuspy` for `home_robot`, recommended solution is to download and build `pybind11`, then build `sophuspy` wheels with it: https://github.com/craigstar/SophusPy/issues/3
+
+### Organising repository and getting models
+Create top-level folder to download checkpoints into, i.e. `mkdir checkpoints && cd checkpoints/`:
 - RAM: `wget https://huggingface.co/spaces/xinyu1205/Tag2Text/resolve/main/ram_swin_large_14m.pth`
 - GroundingDINO: `wget https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth`
 - GNM (ViNT): `wget https://drive.google.com/file/d/1ckrceGb5m_uUtq3pD8KHwnqtJgPl6kF5/view?usp=drive_link`
 
-*NOTE*: No environment setup prepared yet. When manually creating a Python environment, ensure that `transformers==4.26.1`. Older or newer version of `transformers` may cause various issues. To runn LLAVA, `transformers==4.31.0` is required.
-
-*NOTE*: Possible issues encountered with `home_robot`:
-- Failure to build `sophuspy`. Recommended resolution is to download and build `pybind11`, then use it to build `sophuspy` wheels: https://github.com/craigstar/SophusPy/issues/3.
-
-To run tests in habitat:
-
-```
-python navigate_homerobot.py
-```
-
+Create top-level folders for logging and storing data: `mkdir logs && mkdir data`. Overall folder structure:
 Folder structure:
 
 ```
-├── data
+├── data/scene_datasets
 │   ├── hm3d
 │   │   │   ├── val
 │   │   │   │   ├── content
@@ -103,4 +98,8 @@ Folder structure:
         ├── action.txt
         └── query.log
 
+```
+### Run simulation tests
+```
+python navigate_homerobot.py
 ```
