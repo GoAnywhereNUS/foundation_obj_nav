@@ -1,21 +1,11 @@
 import json
 import networkx as nx
-import numpy as np
 import torch
 
 from functools import reduce
-from utils.graph_utils import NodeKey
+from dataclasses import dataclass
 
 ######## Scene graph specs ########
-#
-# Scene graph specs have the following requirements:
-#   1. Specify all the node types present in the graph
-#   2. For each node type, specify the edge types and label them semantically
-#   3. The scene graph always contains "object" as the lowest level
-#   4. The specs should also specify the agent's state representation.
-#      This is done in a list, and should reflect the agent's location with
-#      respect to the hierarchical structure of the scene graph. E.g.
-#      state = [building1, floor2, livingroom2]
 
 default_scene_graph_specs = """
 {
@@ -41,7 +31,7 @@ default_scene_graph_specs = """
 
 ############### Meta-structure #############
 
-class OSGMetaStructure(type):
+class OSGMetaStructure:
     """
     Meta-structure describes the minimal data and allowable
     structure of an OSG.
@@ -201,13 +191,19 @@ class OSGMetaStructure(type):
                     layer_map[v["layer_id"]] = [k]
         return layer_map
 
+############### OSG Specification #############
 
 class OSGSpec(OSGMetaStructure):
     def __init__(self, spec):
         """
+        A schema describing the OSG structure for a 
+        particular class of environments, e.g. structure of
+        household environments.
+
+        Note that OSGSpec should be treated as an immutable object.
+
         Input: spec, JSON object
         """
-
         # Validate and store the spec in queryable form
         OSGMetaStructure.validate(spec)
         self._class_view = spec
@@ -224,12 +220,12 @@ class OSGSpec(OSGMetaStructure):
                     attrs.update(values["attrs"]) # Not yet implemented in specs
                 self._node_attrs[cls] = attrs
 
-    def getNodeTemplate(self, node_class):
-        if node_class not in self._node_attrs.keys():
+    def getNodeTemplate(self, node_cls):
+        if node_cls not in self._node_attrs.keys():
             raise Exception("Invalid node type")
         attrs = {
             attr: attr_type()
-            for attr, attr_type in self._node_attrs[node_class].items()
+            for attr, attr_type in self._node_attrs[node_cls].items()
         }
         return attrs
     
@@ -238,9 +234,26 @@ class OSGSpec(OSGMetaStructure):
     
     def getLayerClasses(self, layer_id):
         return self._layer_view[layer_id]
+    
+    def hasEdgeType(self, node_cls: str, edge_type: str):
+        return edge_type in self._class_view[node_cls]
+        
 
+############### OSG #############
 
-class OpenSceneGraph:  
+class OpenSceneGraph:
+    @dataclass(frozen=True)
+    class NodeKey:
+        node_cls : str
+        label : str
+        uid : int
+
+        def __repr__(self):
+            return f'{self.node_cls}_{self.label}_{self.uid}'
+        
+        def __str__(self):
+            return f'{self.label}_{self.uid}'
+
     def __init__(self, spec):
         """
         Input: spec, JSON string
@@ -248,23 +261,27 @@ class OpenSceneGraph:
         self.spec = OSGSpec(json.loads(spec))
         self.G = nx.DiGraph()
 
+    def getEmptyNodeAttrs(self, node_cls):
+        return self.spec.getNodeTemplate(node_cls)
+
     def addNode(self, node_cls, attr_vals):
         assert "label" in attr_vals, "Need label to add node!"
 
         attrs = self.spec.getNodeTemplate(node_cls)
         attrs.update(attr_vals)
-        attrs["id"] = self.getUniqueId(node_cls, attrs["label"])
-        node_key = NodeKey(node_cls=node_cls, label=attrs["label"], uid=attrs["id"])
+        attrs["id"] = self._getUniqueId(node_cls, attrs["label"])
+        node_key = OpenSceneGraph.NodeKey(
+            node_cls=node_cls, label=attrs["label"], uid=attrs["id"])
         self.G.add_node(node_key, **attrs)
+
+        return node_key
 
     def getNode(self, node_key: type[NodeKey]):
         return self.G.nodes()[node_key]
-
-    def updateNode(self, orig_key: type[NodeKey], new_key: type[NodeKey]):
-        pass
     
-    def makeNodeKey(self, label: str, layer: int, uid: int):
-        return NodeKey(label=label, uid=uid, layer=layer)
+    def setNodeAttr(self, node_key: type[NodeKey], att_val):
+        att, val = att_val
+        self.G.nodes()[node_key][att] = val
     
     def getClass(self, node_class: str):
         return [
@@ -277,8 +294,53 @@ class OpenSceneGraph:
             node for node, attrs in self.G.nodes(data=True)
             if attrs["layer"] == layer
         ]
+    
+    def getDestNodes(
+        self,
+        src_node_key: type[NodeKey],
+        edge_type: str,
+    ):
+        """
+        Get all successor nodes that are connected to a given source node
+        (src_node_key) by a given edge type (edge_type)
+        """
+        return [
+            dst for _, dst, attrs in self.G.out_edges(src_node_key, data=True)
+            if attrs["label"] == edge_type
+        ]
 
-    def getUniqueId(self, node_cls: str, label: str):
+    def getChildNodes(self, node_key: type[NodeKey]):
+        return self.getDestNodes(node_key, "contains")
+
+    def getConnectedNodes(self, node_key: type[NodeKey]):
+        return self.getDestNodes(node_key, "connects to")
+    
+    def getNearbyNodes(self, node_key: type[NodeKey]):
+        return self.getDestNodes(node_key, "is near")
+    
+    def getNodeObjectFeatures(self, node_key: type[NodeKey]):
+        neighbours = self.getNearbyNodes(node_key)
+        return list(map(str, neighbours))
+    
+    def getShortestPathLengths(
+        self,
+        src_node_key: type[NodeKey],
+        dst_node_keys: list[type[NodeKey]],
+    ):
+        spatial_subgraph_view = self._getSpatialSubgraph()
+        lengths = []
+        for dst in dst_node_keys:
+            try:
+                lengths.append(nx.shortest_path_length(
+                    spatial_subgraph_view, src_node_key, dst))
+            except nx.NetworkXNoPath:
+                lengths.append(float('inf'))
+        return lengths
+
+    def getSpec(self):
+        return self.spec
+
+    def _getUniqueId(self, node_cls: str, label: str):
         instances = [
             1 for node, _ in self.G.nodes(data=True)
             if (node.node_cls == node_cls and 
@@ -286,8 +348,24 @@ class OpenSceneGraph:
         ]
         return sum(instances) + 1 # 1-indexed
     
-    def getSpec(self):
-        return self.spec
+    def _getSpatialSubgraph(self):
+        """
+        Extracts a subgraph representing the scene's spatial topology from 
+        the OSG. Specifically, this is the subgraph of all the Places and
+        Connectors joined together with "connects to" edges.
+        """
+        def isPlaceConnector(n):
+            layer_id = self.spec.getClassSpec(n.node_cls)['layer_id']
+            return layer_id == 2 or layer_id == 3
+        edges = [
+            (src, dst) for src, dst, data in self.G.edges(data=True)
+            if (
+                data['label'] == "connects to" and 
+                isPlaceConnector(src) and 
+                isPlaceConnector(dst)
+            )
+        ]
+        return self.G.edge_subgraph(edges)
     
 
 if __name__ == "__main__":

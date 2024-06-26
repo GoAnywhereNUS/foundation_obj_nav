@@ -7,6 +7,8 @@ import torchvision
 from PIL import Image
 import numpy as np
 import re
+from typing import Any, Callable, Optional, Union
+
 # GPT
 import openai
 import logging
@@ -233,6 +235,67 @@ CHECK_GOAL_USER_EXAMPLE_3 = """You are a robot exploring an environment for the 
 CHECK_GOAL_AGENT_EXAMPLE_3 = """
 Answer: ["chair", "armchair"]
 """
+
+class GPTInterfaceRefactor(LLMInterface):
+    def __init__(
+            self,
+            key_path="configs/openai_api_key.yaml",
+            config_path="configs/gpt_config.yaml",
+    ):
+        super().__init__()
+        with open(key_path, 'r') as f:
+            key_dict = yaml.safe_load(f)
+            api_key = key_dict['api_key']
+        with open(config_path, 'r') as f:
+            self.config = yaml.safe_load(f)
+
+        self.client = openai
+        self.client.api_key = api_key
+
+    def reset(self):
+        pass
+
+    def query(
+        self,
+        prompt: str,
+        validate_fn: Callable[[list[Any]], list[Any]],
+        required_samples: int = 1,
+        max_tries: int = 3,
+    ):
+        """
+        Queries a response from LLM for a given prompt. The required
+        number of response instances can be specified, and it will
+        make multiple query attempts in case of failures to respond.
+
+        Inputs: prompt, string
+                required_samples, int, no. of response instances needed
+                validate_fn, function that identifies valid answers in response
+                max_tries, int, maximum no. of attempts
+        """
+        answers = []
+        valid = False
+        remaining_samples_needed = required_samples
+        for _ in range(max_tries):
+            response = self.client.chat.completions.create(
+                model=self.config["model_type"],
+                messages=prompt,
+                n=remaining_samples_needed,
+                seed=self.config["seed"],
+                temperature=self.config["temperature"]
+            )
+
+            for choice in response.choices:
+                validated_resp = validate_fn(choice.message.content)
+                if validated_resp is not None:
+                    answers.append(validated_resp)
+
+            remaining_samples_needed = required_samples - len(answers)
+            valid = remaining_samples_needed <= 0
+            if valid:
+                break
+
+        return valid, answers
+        
 
 class GPTInterface(LLMInterface):
     def __init__(
@@ -490,6 +553,47 @@ class VLM_BLIP(VQAPerception):
         ans = self.model.predict_answers(samples=samples, inference_method="generate")
         return ans[0]
     
+class VLM_BLIPRefactor(VQAPerception):
+    def __init__(self):
+
+        super().__init__()
+
+        self.model, self.image_preprocessors, self.text_preprocessors = load_model_and_preprocess(
+            name="blip_vqa", model_type="vqav2", is_eval=True, device=self.device
+        )
+
+    def query(
+            self, 
+            image_input: Union[Image.Image, list],
+            prompt_input: Union[str, list],
+            validate_fn: Callable[[str], Optional[str]],
+            prompts_per_image: int = 1,
+    ):
+        assert prompts_per_image >= 1, "Invalid number of prompts per image"
+        assert isinstance(image_input, list) == isinstance(prompt_input, list), \
+            "Image and prompt input types do not match"
+        if not isinstance(image_input, list):
+            image_input, prompt_input = [image_input], [prompt_input]
+        assert len(image_input) * prompts_per_image == len(prompt_input), \
+            "No. of input images does not match no. of prompts"
+
+        preprocessed_ims = torch.stack([
+            self.image_preprocessors["eval"](im.convert("RGB")) for im in image_input
+        ]).to(self.device)
+        if prompts_per_image > 1:
+            preprocessed_ims = torch.repeat_interleave(
+                preprocessed_ims, prompts_per_image, dim=0)
+        preprocessed_qns = [self.text_preprocessors["eval"](p) for p in prompt_input]
+        samples = {
+            "image": preprocessed_ims,
+            "text_input": preprocessed_qns,
+        }
+        ans = self.model.predict_answers(
+            samples=samples, inference_method="generate")
+        
+        return validate_fn(ans)
+
+    
 class VLM_LLAVA(VQAPerception):
     def __init__(self):
         super().__init__()
@@ -580,6 +684,10 @@ class VLM_GroundingDino(ObjectPerception):
             torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
         ])
 
+        # Hyperparameters for filtering
+        self.small_object_filter_pix = 80
+        self.glass_objects_iou_pix = 0.7
+
     def _preprocess_image(self, image, model):
         """
         Image preprocessor.
@@ -664,17 +772,54 @@ class VLM_GroundingDino(ObjectPerception):
         boxes_filt = boxes_filt[nms_idx]
         pred_phrases = [pred_phrases[idx] for idx in nms_idx]
         selected_labels = [selected_labels[idx] for idx in nms_idx]
-        cropeed_obj_lst = []
+        cropped_ims = []
         for i in range(len(boxes_filt)):
             cropped_img = image.crop(np.array(boxes_filt[i]))
-            cropeed_obj_lst.append(cropped_img)
+            cropped_ims.append(cropped_img)
 
-        return boxes_filt, selected_labels, cropeed_obj_lst
+        return boxes_filt, selected_labels, cropped_ims
 
-    def detect_all_objects(self, image):
-        return self._detect_objects(image)
+    def _filter(self, object_detections):
+        od = list(zip(*object_detections))
+
+        # Remove small objects
+        filter_small = [
+            ((min_x, min_y, max_x, max_y), l, c)
+            for (min_x, min_y, max_x, max_y), l, c in od
+            if (abs(max_x - min_x) < self.small_object_filter_pix or
+                abs(max_y - min_y) < self.small_object_filter_pix)
+        ]
+
+        # Remove objects obscured by glass
+        glass_objects = torch.Tensor([
+            list(bb) + [(bb[2] - bb[0]) * 0.5, (bb[3] - bb[1]) * 0.5]
+            for bb, l, _ in filter_small if 'glass' in l
+        ])
+        bboxes = torch.Tensor([
+            list(bb) + [(bb[2] - bb[0]) * 0.5, (bb[3] - bb[1]) * 0.5]
+            for bb, _l, _ in filter_small if 'glass' not in l
+        ])
+        iou_with_glass = torchvision.ops.box_iou(
+            bboxes[:, :-2], glass_objects[:, :-2])
+        iou_thresholded = torch.all(
+            iou_with_glass < self.glass_objects_iou_pix, dim=1)
+        filter_glass = [
+            obj for obj, low_overlap in zip(filter_small, iou_thresholded) 
+            if low_overlap
+        ]
+
+        return list(zip(*filter_glass))
+
+    def detect_all_objects(self, image, filter=False):
+        object_detections = self._detect_objects(image)
+        if filter:
+            return self._filter(object_detections)
+        return object_detections
     
-    def detect_specific_objects(self, image, object_list):
+    def detect_specific_objects(self, image, object_list, filter=False):
         assert len(object_list) > 0, "If not detecting specific objects, use detect_all_objects"
         additional_tags = functools.reduce(lambda a, b: a + ", " + b, object_list)
-        return self._detect_objects(image, additional_tags)
+        object_detections = self._detect_objects(image, additional_tags)
+        if filter:
+            return self._filter(object_detections)
+        return object_detections
