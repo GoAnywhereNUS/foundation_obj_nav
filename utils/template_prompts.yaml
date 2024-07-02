@@ -1,3 +1,7 @@
+PLACE_CLASS:
+  ctx: ~
+  fewshot: ~
+  query: Which of the place types {place_classes} best describes the scene?
 LABEL_PLACE:
   ctx: ~
   fewshot: ~

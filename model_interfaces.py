@@ -1,12 +1,12 @@
 import os
 import sys
 import yaml
-import functools
 import torch
 import torchvision
 from PIL import Image
 import numpy as np
 import re
+from functools import reduce
 from typing import Any, Callable, Optional, Union
 
 # GPT
@@ -76,25 +76,37 @@ class ObjectPerception:
     def __init__(self):
         self.device = torch.device("cuda")
 
-    def detect_all_objects(self, image):
+    def detect_all_objects(self, image, filter=False):
         """
         Input:
             image: PIL image type
-        
         Return:
             list of bounding boxes
         """
-        raise NotImplementedError
+        object_detections = self._detect_objects(image)
+        if filter:
+            return self._filter(object_detections)
+        return object_detections
     
-    def detect_specific_objects(self, image, object_list):
+    def detect_specific_objects(self, image, object_list, filter=False):
         """
         Input:
             image: PIL image type
             object_list: List of String describing objects to find, eg: ["door, "exit", ...]
-        
         Return:
             list of bounding boxes
         """
+        assert len(object_list) > 0, "If not detecting specific objects, use detect_all_objects"
+        additional_tags = reduce(lambda a, b: a + ", " + b, object_list)
+        object_detections = self._detect_objects(image, additional_tags)
+        if filter:
+            return self._filter(object_detections)
+        return object_detections
+    
+    def _detect_objects(self, image, additional_tags):
+        raise NotImplementedError
+
+    def _filter(self, object_detections):
         raise NotImplementedError
   
 ######## Foundation model instantiations ########
@@ -554,13 +566,14 @@ class VLM_BLIP(VQAPerception):
         return ans[0]
     
 class VLM_BLIPRefactor(VQAPerception):
-    def __init__(self):
+    def __init__(self, max_batch_size: int = 16):
 
         super().__init__()
 
         self.model, self.image_preprocessors, self.text_preprocessors = load_model_and_preprocess(
             name="blip_vqa", model_type="vqav2", is_eval=True, device=self.device
         )
+        self.max_batch_size = max_batch_size
 
     def query(
             self, 
@@ -584,14 +597,21 @@ class VLM_BLIPRefactor(VQAPerception):
             preprocessed_ims = torch.repeat_interleave(
                 preprocessed_ims, prompts_per_image, dim=0)
         preprocessed_qns = [self.text_preprocessors["eval"](p) for p in prompt_input]
-        samples = {
-            "image": preprocessed_ims,
-            "text_input": preprocessed_qns,
-        }
-        ans = self.model.predict_answers(
-            samples=samples, inference_method="generate")
         
-        return validate_fn(ans)
+        batched_iters = int(np.ceil(preprocessed_ims.shape[0] / self.max_batch_size))
+            
+        answers = []
+        for iter in range(batched_iters):
+            lo = iter * self.max_batch_size
+            hi = min(lo + self.max_batch_size, preprocessed_ims.shape[0])
+            samples = {
+                "image": preprocessed_ims[lo:hi],
+                "text_input": preprocessed_qns[lo:hi],
+            }
+            answers += self.model.predict_answers(
+                samples=samples, inference_method="generate")
+        
+        return validate_fn(answers)
 
     
 class VLM_LLAVA(VQAPerception):
@@ -809,17 +829,3 @@ class VLM_GroundingDino(ObjectPerception):
         ]
 
         return list(zip(*filter_glass))
-
-    def detect_all_objects(self, image, filter=False):
-        object_detections = self._detect_objects(image)
-        if filter:
-            return self._filter(object_detections)
-        return object_detections
-    
-    def detect_specific_objects(self, image, object_list, filter=False):
-        assert len(object_list) > 0, "If not detecting specific objects, use detect_all_objects"
-        additional_tags = functools.reduce(lambda a, b: a + ", " + b, object_list)
-        object_detections = self._detect_objects(image, additional_tags)
-        if filter:
-            return self._filter(object_detections)
-        return object_detections

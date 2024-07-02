@@ -3,8 +3,10 @@ import yaml
 import inspect
 
 from enum import IntEnum
-from open_scene_graph import OSGSpec
 from typing import Optional
+
+from open_scene_graph import OSGSpec
+from utils.string_utils import generic_string_format
 
 ### Objects to format prompts for queries ###
 class PromptType(IntEnum):
@@ -13,6 +15,7 @@ class PromptType(IntEnum):
     SCENE_ELEMENT_CLASSIFICATION = 2
     PLACE_LABEL_SIMILARITY = 3
     PAIRWISE_PLACE_MATCHING = 4
+    PLACE_CLASS = 5
 
     def __str__(self):
         return self.name
@@ -29,6 +32,7 @@ class PromptRegistry:
     def __init__(self, spec: type[OSGSpec]):
         self.spec = spec
         self.methods = {
+            PromptType.PLACE_CLASS: (self._makePromptPC, self._handleRespPC),
             PromptType.LABEL_PLACE : (self._makePromptPL, self._handleRespPL),
             PromptType.APPEARANCE_DESCRIPTION: (self._makePromptDesc, self._handleRespDesc),
             PromptType.SCENE_ELEMENT_CLASSIFICATION: (self._makePromptClassify, self._handleRespClassify),
@@ -55,31 +59,53 @@ class PromptRegistry:
         # Return prompt and a handler function to format and validate 
         return (
             make_prompt_fn(ctx),
-            lambda r: validate_fn(r, ctx) if need_ctx_to_validate else validate_fn
+            lambda r: (
+                validate_fn(r, ctx) if need_ctx_to_validate else validate_fn(r)
+            )
         )
         
-    def _makePromptPL(self, ctx=None):
+    def _makePromptPC(self, ctx=None) -> str:
         """
         Input: ctx, None, no context needed for this function
         """
-        temp = self.prompt_templates[str(PromptType.LABEL_PLACE)]['query']
+        temp = self.prompt_templates[str(PromptType.PLACE_CLASS)]['query']
         place_classes = self.spec.getLayerClasses(3)
+        return temp.format(place_classes=place_classes)
+
+    def _makePromptPL(self, ctx : str) -> str:
+        """
+        Input: ctx, string of identified place class
+        """
+        temp = self.prompt_templates[str(PromptType.LABEL_PLACE)]['query']
+        return temp.format(place_class=ctx)
 
         # TODO: Currently we can only handle having one place class. Need
         # to generalise to arbitrary no. of place classes
-        return temp.format(place_class=place_classes[0])
+        # place_classes = self.spec.getLayerClasses(3)
+        # return temp.format(place_class=place_classes[0])
 
-    def _makePromptDesc(self, ctx: list[str]):
+    def _makePromptDesc(
+        self, 
+        ctx: tuple[dict[str, list[int]], list[str]],
+        detailed: bool = False,
+    ) -> list[str]:
         """
-        Input: ctx, list of object names to insert into templated prompt
+        Input: ctx, tuple of (class_to_object_map, combined_obdet_labels)
+               where the map is {"entrance": [1,2,...], "object": [n, n+1, ...]}
+               and each list element is an index into combined_obdet_labels
         """
         temp = self.prompt_templates[str(PromptType.APPEARANCE_DESCRIPTION)]['query']
+        class_to_object_map, detailed_labels = ctx
+        flattened_map= [
+            (k, detailed_labels[idx])
+            for k, v in class_to_object_map.items() for idx in v
+        ]
         return [
-            t.format(object_name=object_name)
-            for object_name in ctx for t in temp            
+            t.format(object_name=o) if detailed else t.format(object_name=k)
+            for k, o in flattened_map for t in temp
         ]
         
-    def _makePromptClassify(self, ctx: list[str]):
+    def _makePromptClassify(self, ctx: list[str]) -> list[dict[str, str]]:
         """
         Input: ctx, list of detections (as text strings) to be sorted into different layers
         """
@@ -100,7 +126,7 @@ class PromptRegistry:
         ]
         return chat
 
-    def _makePromptSim(self, ctx: list[str]):
+    def _makePromptSim(self, ctx: list[str]) -> str:
         """
         Input: ctx, list of names of all places in OSG
         """
@@ -111,7 +137,7 @@ class PromptRegistry:
         return temp.format(all_place_labels=ctx, place_class=place_classes[0])
 
 
-    def _makePromptMatch(self, ctx: dict[str, str]):
+    def _makePromptMatch(self, ctx: dict[str, str]) -> list[dict[str, str]]:
         """
         Input: ctx, dict containing descriptions of observed and candidate places
         """
@@ -137,21 +163,26 @@ class PromptRegistry:
         ]
         return chat
 
+    def _handleRespPC(self, resp):
+        raise NotImplementedError
 
     def _handleRespPL(self, resp: list[str]):
-        return [
-            s.replace(" ", "") for s in resp # remove spaces
-        ]
+        formatted = [s.replace(" ", "") for s in resp] # remove spaces
+        return formatted[0] # should only have one place label in response
 
     def _handleRespDesc(self, resp: list[str], ctx: list[str]):
         """
         Input: resp, list of strings of (multiple) attrs of objects in ctx
-               ctx, list of strings of detected objects to be described
+               ctx, tuple of (class_to_object_map, combined_obdet_labels)
+               where the map is {"entrance": [1,2,...], "object": [n, n+1, ...]}
+               and each list element is an index into combined_obdet_labels
         """
-        assert len(resp) == len(ctx) * 2, "resp and ctx have unmatched lengths"
+        class_to_object_map, _ = ctx
+        object_count = sum(map(len, class_to_object_map.values()))
+        print(ctx, resp)
+        assert len(resp) == object_count * 2, "resp and ctx have unmatched lengths"
         return [
-            resp[i*2] + ' ' + resp[i*2+1] + ' ' + object_name
-            for i, object_name in enumerate(ctx)
+            resp[i*2] + ' ' + resp[i*2+1] for i in range(object_count)
         ]
 
     def _handleRespClassify(
@@ -165,11 +196,9 @@ class PromptRegistry:
         queried_classes = place_classes + connector_classes + ["object"]
 
         # Format and listify response
-        print(ctx)
-        lowered = resp.lower()
-        formatted = lowered.replace(' ', '').replace('.', '')
+        formatted = generic_string_format(resp)
         itemised = [
-            elem for elem in re.split('\n|,|:|-', formatted) 
+            elem for elem in re.split('\n|,|:|-', formatted)
             if elem != 'none'
         ]
 
@@ -183,12 +212,11 @@ class PromptRegistry:
         # from the queried classes
         def validate_elem_fn(e: str) -> bool:
             try:
-                encoded_idx = int(e.split('_')[-1])
-                print("?", encoded_idx, len(ctx))
-                print("&", ctx[encoded_idx])
+                object_name, encoded_idx = e.split('_')
+                encoded_idx = int(encoded_idx)
                 return (
                     encoded_idx < len(ctx) and
-                    e == ctx[encoded_idx]
+                    object_name == ctx[encoded_idx]
                 )
             except:
                 return False
@@ -199,7 +227,6 @@ class PromptRegistry:
             class_ranges = list(zip(
                 class_indices, class_indices[1:] + [len(itemised)]
             ))
-            print(class_ranges)
             ranges = [
                 r for (_, cls), r in zip(returned_classes, class_ranges) 
                 if cls in observable_classes
@@ -213,11 +240,6 @@ class PromptRegistry:
             # }
             # where each idx is an index into the original combined objects list
             print(returned_classes, observable_classes, class_ranges, ranges)
-            for cls, (lo, hi) in zip(observable_classes, ranges):
-                if cls in observable_classes:
-                    print(">", cls)
-                    print(itemised[lo+1:hi])
-                    print([validate_elem_fn(e) for e in itemised[lo+1:hi]])
             class_to_object_map = {
                 cls : [
                     int(e.split('_')[-1]) for e in itemised[lo+1:hi]

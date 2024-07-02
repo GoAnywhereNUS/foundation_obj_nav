@@ -4,6 +4,7 @@ import torch
 
 from functools import reduce
 from dataclasses import dataclass
+from typing import Any
 
 ######## Scene graph specs ########
 
@@ -261,8 +262,17 @@ class OpenSceneGraph:
         self.spec = OSGSpec(json.loads(spec))
         self.G = nx.DiGraph()
 
-    def getEmptyNodeAttrs(self, node_cls):
+    def getDefaultNodeAttrs(self, node_cls: str):
         return self.spec.getNodeTemplate(node_cls)
+    
+    def makeNewNodeAttrs(
+        self, 
+        node_cls: str, 
+        attr_vals: dict[str, Any] = None,
+    ):
+        default_attrs = self.getDefaultNodeAttrs(node_cls)
+        default_attrs.update(attr_vals)
+        return default_attrs
 
     def addNode(self, node_cls, attr_vals):
         assert "label" in attr_vals, "Need label to add node!"
