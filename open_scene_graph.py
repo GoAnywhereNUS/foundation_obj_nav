@@ -4,7 +4,7 @@ import torch
 
 from functools import reduce
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Union
 
 ######## Scene graph specs ########
 
@@ -13,18 +13,19 @@ default_scene_graph_specs = """
     "room": {
         "layer_type": "Place",
         "layer_id": 3,
-        "contains": ["Object"],
+        "contains": ["object"],
         "connects to": ["entrance", "room"]
     },
     "entrance": {
         "layer_type": "Connector",
         "layer_id": 2,
-        "is near": ["Object"],
+        "is near": ["object"],
         "connects to": ["room"]
     },
-    "Object": {
+    "object": {
         "layer_type": "Object",
-        "layer_id": 1
+        "layer_id": 1,
+        "is near": ["object", "entrance"]
     },
     "state": ["room"]
 }
@@ -97,7 +98,7 @@ class OSGMetaStructure:
         for place_cls in places_layer:
             place_cls_spec = spec[place_cls]
 
-            assert ("contains" in place_cls_spec and "Object" in place_cls_spec["contains"]), \
+            assert ("contains" in place_cls_spec and "object" in place_cls_spec["contains"]), \
                 f'{place_cls} does not contain Objects'
             
             allowed_classes = places_layer + connectors_layer
@@ -122,7 +123,7 @@ class OSGMetaStructure:
         for connector_cls in connectors_layer:
             connector_cls_spec = spec[connector_cls]
             
-            allowed_classes = connectors_layer + ["Object"]
+            allowed_classes = connectors_layer + ["object"]
             valid = OSGMetaStructure.checkEdgeSpecValid(connector_cls_spec, "is near", allowed_classes)
             assert valid, f'{connector_cls} has no is near edges or has edges to invalid class'
 
@@ -236,9 +237,50 @@ class OSGSpec(OSGMetaStructure):
     def getLayerClasses(self, layer_id):
         return self._layer_view[layer_id]
     
-    def hasEdgeType(self, node_cls: str, edge_type: str):
-        return edge_type in self._class_view[node_cls]
+    def getHighestLayerId(self):
+        return max(self._layer_view.keys())
+
+    def isConnectable(self, src_node_cls: str, dst_node_cls: str) -> bool:
+        """
+        Verifies that two classes can be spatially connected according to spec.
+        Ensures two-way connectivity.
+        """
+        src_cls_spec = self._class_view[src_node_cls]
+        dst_cls_spec = self._class_view[dst_node_cls]
+        return (
+            "connects to" in src_cls_spec and
+            "connects to" in dst_cls_spec and
+            dst_node_cls in self._class_view[src_node_cls]["connects to"] and
+            src_node_cls in self._class_view[dst_node_cls]["connects to"]
+        )
+    
+    def isProximable(self, src_node_cls: str, dst_node_cls: str) -> bool:
+        """
+        Verifies that dst class can be near the src class
+        """
+        print('Prox query:', src_node_cls, dst_node_cls)
+        cls_spec = self._class_view[src_node_cls]
+        return "is near" in cls_spec and dst_node_cls in cls_spec["is near"]
+
+    def isContainable(self, src_node_cls: str, dst_node_cls: str) -> bool:
+        """
+        Verifies that dst class can be contained by the src class.
+        """
+        print('Cont query:', src_node_cls, dst_node_cls)
+        cls_spec = self._class_view[src_node_cls]
+        return "contains" in cls_spec and dst_node_cls in cls_spec["contains"]
         
+    def isObject(self, node_cls: str) -> bool:
+        return self._class_view[node_cls]["layer_id"] == 1
+    
+    def isConnector(self, node_cls: str) -> bool:
+        return self._class_view[node_cls]["layer_id"] == 2
+    
+    def isPlace(self, node_cls: str) -> bool:
+        return self._class_view[node_cls]["layer_id"] == 3
+    
+    def isRegionAbstraction(self, node_cls: str) -> bool:
+        return self._class_view[node_cls]["layer_id"] > 3
 
 ############### OSG #############
 
@@ -262,7 +304,9 @@ class OpenSceneGraph:
         self.spec = OSGSpec(json.loads(spec))
         self.G = nx.DiGraph()
 
+    ### Adding or updating nodes
     def getDefaultNodeAttrs(self, node_cls: str):
+        print("***", node_cls)
         return self.spec.getNodeTemplate(node_cls)
     
     def makeNewNodeAttrs(
@@ -283,16 +327,67 @@ class OpenSceneGraph:
         node_key = OpenSceneGraph.NodeKey(
             node_cls=node_cls, label=attrs["label"], uid=attrs["id"])
         self.G.add_node(node_key, **attrs)
-
         return node_key
 
     def getNode(self, node_key: type[NodeKey]):
         return self.G.nodes()[node_key]
     
-    def setNodeAttr(self, node_key: type[NodeKey], att_val):
-        att, val = att_val
-        self.G.nodes()[node_key][att] = val
+    def setNodeAttrs(
+        self, 
+        node_key: type[NodeKey], 
+        atts_vals: dict[str, Any],
+    ):
+        nx.set_node_attributes(self.G, {node_key: atts_vals})
+
+    ### Adding or updating edges
+    def addEdges(
+        self, 
+        src: type[NodeKey], 
+        dsts: Union[type[NodeKey], list[type[NodeKey]]], 
+        edge_type: str
+    ):
+        dsts = dsts if isinstance(dsts, list) else [dsts]
+        if edge_type == "contains":
+            for dst in dsts:
+                self._addContainmentEdge(src, dst)
+        elif edge_type == "connects to":
+            for dst in dsts:
+                self._addConnectivityEdge(src, dst)
+        elif edge_type == "is near":
+            for dst in dsts:
+                self._addProximityEdge(src, dst)
+        else:
+            raise Exception(f"Tried to add invalid edge type {edge_type}!")
     
+    def _addConnectivityEdge(self, src: type[NodeKey], dst: type[NodeKey]):
+        if self.spec.isConnectable(src.node_cls, dst.node_cls):
+            self.G.add_edges_from([(src, dst), (dst, src)], edge_type="connects to")
+        else:
+            print(f"Not adding invalid edge. {dst} cannot be contained in {src}!")
+
+    def _addProximityEdge(self, src: type[NodeKey], dst: type[NodeKey]):
+        if self.spec.isProximable(src.node_cls, dst.node_cls):
+            self.G.add_edge(src, dst, edge_type="is near")
+        else:
+            print(f"Not adding invalid edge. {dst} cannot be near {src}!")
+
+    def _addContainmentEdge(self, src: type[NodeKey], dst: type[NodeKey]):
+        if self.spec.isContainable(src.node_cls, dst.node_cls):
+            self.G.add_edge(src, dst, edge_type="contains")
+        else:
+            print(f"Not adding invalid edge. {dst} cannot be near {src}!")
+
+    def removeEdge(self, src: type[NodeKey], dst: type[NodeKey]):
+        self.G.remove_edge(src, dst)
+
+    def resetOutEdges(self, src: type[NodeKey]):
+        """
+        Removes all out edges from a given src node
+        """
+        outgoing_edges = list(self.G.out_edges(src))
+        self.G.remove_edges_from(outgoing_edges)
+
+    ### Querying data from OSG
     def getClass(self, node_class: str):
         return [
             node for node, attrs in self.G.nodes(data=True) 
@@ -328,9 +423,23 @@ class OpenSceneGraph:
     def getNearbyNodes(self, node_key: type[NodeKey]):
         return self.getDestNodes(node_key, "is near")
     
-    def getNodeObjectFeatures(self, node_key: type[NodeKey]):
-        neighbours = self.getNearbyNodes(node_key)
-        return list(map(str, neighbours))
+    def getNodeObjectFeatures(
+        self, 
+        node_key: type[NodeKey], 
+        return_descriptors: bool = False,
+    ):
+        if self.isPlace(node_key):
+            object_feat_nodes = self.getChildNodes(node_key)
+        elif self.isConnector(node_key) or self.isObject(node_key):
+            object_feat_nodes = self.getNearbyNodes(node_key)
+        else:
+            raise Exception(
+                "Object features may only be queried for Object/Connector/Place nodes"
+            )
+        stringified = list(map(str, object_feat_nodes))
+        if return_descriptors:
+            raise NotImplementedError
+        return stringified
     
     def getShortestPathLengths(
         self,
@@ -349,7 +458,25 @@ class OpenSceneGraph:
 
     def getSpec(self):
         return self.spec
+    
+    ### Misc utilities
+    def isObject(self, node: type[NodeKey]):
+        layer_id = self.spec.getClassSpec(node.node_cls)["layer_id"]
+        return layer_id == 1
 
+    def isConnector(self, node: type[NodeKey]):
+        layer_id = self.spec.getClassSpec(node.node_cls)["layer_id"]
+        return layer_id == 2
+
+    def isPlace(self, node: type[NodeKey]):
+        layer_id = self.spec.getClassSpec(node.node_cls)["layer_id"]
+        return layer_id == 3
+
+    def isRegion(self, node: type[NodeKey]):
+        layer_id = self.spec.getClassSpec(node.node_cls)["layer_id"]
+        return layer_id >= 3
+
+    ### Other internal functions for the OSG
     def _getUniqueId(self, node_cls: str, label: str):
         instances = [
             1 for node, _ in self.G.nodes(data=True)

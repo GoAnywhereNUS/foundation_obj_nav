@@ -3,9 +3,10 @@ import yaml
 import inspect
 
 from enum import IntEnum
-from typing import Optional
+from typing import Any, Optional
+from functools import reduce
 
-from open_scene_graph import OSGSpec
+from open_scene_graph import OSGSpec, OpenSceneGraph
 from utils.string_utils import generic_string_format
 
 ### Objects to format prompts for queries ###
@@ -16,9 +17,11 @@ class PromptType(IntEnum):
     PLACE_LABEL_SIMILARITY = 3
     PAIRWISE_PLACE_MATCHING = 4
     PLACE_CLASS = 5
+    OBJECT_DATA_ASSOCIATION = 6
 
     def __str__(self):
         return self.name
+    
 
 class PromptRegistry:
     """
@@ -38,6 +41,7 @@ class PromptRegistry:
             PromptType.SCENE_ELEMENT_CLASSIFICATION: (self._makePromptClassify, self._handleRespClassify),
             PromptType.PLACE_LABEL_SIMILARITY: (self._makePromptSim, self._handleRespSim),
             PromptType.PAIRWISE_PLACE_MATCHING: (self._makePromptMatch, self._handleRespMatch),
+            PromptType.OBJECT_DATA_ASSOCIATION: (self._makePromptAssoc, self._handleRespAssoc),
         }
 
         with open('utils/template_prompts.yaml') as f:
@@ -163,6 +167,45 @@ class PromptRegistry:
         ]
         return chat
 
+    def _makePromptAssoc(self, ctx: dict[str, Any]) -> list[dict[str, str]]:
+        """
+        Input: dict, with the structure:
+               "obs": (obj_str, nearby_objs_strs),
+               "nodes": {"node_str": (node_key, nearby_nodes_strs)}
+        """
+        temp = self.prompt_templates[str(PromptType.OBJECT_DATA_ASSOCIATION)]
+        fewshot = temp['fewshot']
+        query = temp['query']
+
+        obs, obs_feats = ctx['obs']
+        nodes = ctx['nodes']
+
+        def feats_to_str_fn(obj, feats):
+            if len(feats) >= 2:
+                feats = feats[:-2] + [feats[-2] + ' and ' + feats[-1]]
+            feats_str = (
+                'nothing' if len(feats) == 0 else
+                reduce(lambda a, b: a + ', ' + b, feats)
+            )
+            return f'{obj} that is near {feats_str}.'
+        
+        target_node_with_feats = feats_to_str_fn(obs, obs_feats)
+        nodes = [feats_to_str_fn(n, nodes[n][1]) for n in nodes]
+
+        query.format(
+            target_node_with_feats=target_node_with_feats,
+            existing_nodes_with_feats=reduce(lambda a, b: a + ' ' + b, nodes)
+        )
+        
+        chat = [
+            {"role": "system", "content": "You are a helpful assistant."}
+        ] + [
+            {"role": k.split('_')[0], "content": v} for k, v in fewshot.items()
+        ] + [
+            {"role": "user", "content": query}
+        ]
+        return chat
+
     def _handleRespPC(self, resp):
         raise NotImplementedError
 
@@ -239,7 +282,8 @@ class PromptRegistry:
             #   "Object": [...]
             # }
             # where each idx is an index into the original combined objects list
-            print(returned_classes, observable_classes, class_ranges, ranges)
+            print(itemised)
+            print(observable_classes, ranges)
             class_to_object_map = {
                 cls : [
                     int(e.split('_')[-1]) for e in itemised[lo+1:hi]
@@ -247,6 +291,8 @@ class PromptRegistry:
                 ] for cls, (lo, hi)  in zip(observable_classes, ranges)
                 if cls in observable_classes
             }
+            print(class_to_object_map)
+            print("@@@@@@")
 
             return class_to_object_map
         return None
@@ -276,3 +322,14 @@ class PromptRegistry:
             return False
         else:
             return None
+        
+    def _handleRespAssoc(
+        self, 
+        resp: str, 
+        ctx: dict[str, Any]
+    ) -> Optional[type[OpenSceneGraph.NodeKey]]:
+        node_name = resp.split("Answer:")[-1].strip()
+        if node_name in ctx['nodes']:
+            return ctx['nodes'][node_name][0]
+        return None
+        

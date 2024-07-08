@@ -75,3 +75,23 @@ PAIRWISE_PLACE_MATCHING:
     'Depiction1: {observed_place_description}\n
     Depiction2: {candidate_place_description}\n
     These are depictions of what I observe from two different vantage points. Please tell me if these two viewpoints correspond to the same {place_class}. It's important to note that the descriptions may originate from two positions within the {place_class}, each with a distinct angle. Therefore, the descriptions may pertain to the same {place_class} but not necessarily capture the same elements. Please be aware that my viewing angle varies, so it is not necessary for the elements to align in the same direction. As long as the relative positions between objects are accurate, it is considered acceptable. Please assess the arrangement of objects and identifiable features in the descriptions to determine whether these two positions are indeed in the same {place_class}. Provide a response of True or False, along with supporting reasons.'
+OBJECT_DATA_ASSOCIATION:
+  ctx: ~
+  fewshot: 
+    user_1: >
+      'We want to find a doorframe that is near a tv, a chair and a stool. Now we have seen the following objects: doorframe_2 that is near chair and sofa. doorframe_3 that is near a tv and a chair. wooden door_2 that is near table, sink and lamp. Please select one object that is most likely to be the object I want to find. Please only select one object in the list and use this element name in answer. Use the exact name in the given sentences. Always follow the format: Answer: <your answer>.'
+    assistant_1: >
+      'Reasoning: Among the given objects, "doorframe_3" is mentioned to be near a TV and a chair, most likely meeting the specified criteria of being near a TV, chair, and stool.
+      Answer: doorframe_3'
+    user_2: >
+      'We want to find a door that is near a dining table, window glass and a table cloth. Now we have seen the following objects: door_2 that is near table and window glass. doorframe_4 that is near a table cloth and a glass. door_4 that is near photo, sofa and windows. Please select one object that is most likely to be the object I want to find. Please only select one object in the list and use this element name in answer. Use the exact name in the given sentences. Always follow the format: Answer: <your answer>.'
+    assistant_2: >
+      'Reasoning: Among the given objects, "door_2" is mentioned to be near a table and window glass. Although "doorframe_4" is also near a tablecloth and a glass, it seems to meet the criteria. However, since the target goal is a door and not a doorframe, "door_2" is more suitable.
+      Answer: door_2'
+    user_3: >
+      'We want to find a door that is near nothing. Now we have seen the following objects: door_1 that is near toy and doorframe. doorframe_3 that is near nothing. door_5 that is near window, cabinet, and bed. Please select one object that is most likely to be the object I want to find. Please only select one object in the list and use this element name in answer. Use the exact name in the given sentences. Always follow the format: Answer: <your answer>.'
+    assistant_3: >
+      'Reasoning: Among the given objects, "doorframe_3" is mentioned to be near nothing. The door we want to find is also near nothing, it seems to meet the criteria. However, since the target goal is a door and not a doorframe, "doorframe_3" is more suitable.
+      Answer: doorframe_3'
+  query: >
+    'We want to find a {target_node_with_feats}. Now we have seen the following objects: {existing_nodes_with_feats} Please select one object that is most likely to be the object I want to find. Please only select one object and use this element name in answer. Use the exact name in the given sentences. Always follow the format: Answer: <your answer>.'

@@ -26,13 +26,13 @@ def draw_annotated_obs(views, obs):
 
         for cls, objects in view_data['objects'].items():
             for obj in objects:
-                label, attr, bbox, image_crop = obj
+                obs_id, label, attr, bbox, image_crop, nidxs = obj
                 draw_colour = "green" if cls.lower() == "connector" else "red"
                 draw.rectangle(bbox, outline=draw_colour, width=2)
 
                 # Draw label and attr
-                text = f"{label} | {attr}"
-                text_position = (bbox[0], bbox[1] - 10)
+                text = f"{obs_id}: {label} | {attr} | {nidxs}"
+                text_position = (bbox[0], bbox[1] + 10)
                 draw.text(text_position, text, fill=draw_colour)
 
                 image_crop.save(f'imgs/{label}_{attr}.png')
