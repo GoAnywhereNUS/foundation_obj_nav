@@ -373,6 +373,9 @@ class OSGMapper:
             
         return est_state
     
+    def visualiseOSG(self, est_state):
+        self.OSG.visualise(show_layer_1_for_node=est_state)
+    
     def _getNeighboursInImage(self, bboxes):
         neighbour_idxs = [[] for _ in range(len(bboxes))]
         if len(bboxes) > 1:

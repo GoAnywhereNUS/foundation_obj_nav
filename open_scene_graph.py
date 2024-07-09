@@ -1,6 +1,7 @@
 import json
 import networkx as nx
 import torch
+import matplotlib.pyplot as plt
 
 from functools import reduce
 from dataclasses import dataclass
@@ -494,15 +495,94 @@ class OpenSceneGraph:
         def isPlaceConnector(n):
             layer_id = self.spec.getClassSpec(n.node_cls)['layer_id']
             return layer_id == 2 or layer_id == 3
+
+        nodes = [node for node in self.G.nodes() if isPlaceConnector(node)]
+        return self.G.subgraph(nodes)
+        
         edges = [
             (src, dst) for src, dst, data in self.G.edges(data=True)
             if (
-                data['label'] == "connects to" and 
+                data['edge_type'] == "connects to" and 
                 isPlaceConnector(src) and 
                 isPlaceConnector(dst)
             )
         ]
+
+        print(self.G.edges(data=True))
+        print(self.G.nodes(data=True))
+        print(edges)
         return self.G.edge_subgraph(edges)
+    
+    ### Visualisation utilities
+    def visualise(self, show_layers=[], show_layer_1_for_node=None):
+        """
+        Visualizes the hierarchical graph.
+        
+        Parameters:
+        - G: NetworkX graph with nodes having the 'layer_id' attribute.
+        - show_layers: List of layers to show. If None, only layers 2 and 3 are shown.
+        - show_layer_1_for_node: If not None, show Layer 1 nodes that are children of this node.
+        """
+        edge_colors = {'contains': 'blue', 'connects to': 'green', 'is near': 'red'}
+        def get_edge_color(u, v):
+            return edge_colors.get(self.G[u][v].get('edge_type', 'type1'), 'black')
+
+        # Create subgraph for layers 2 and 3
+        spatial_subgraph = self._getSpatialSubgraph()
+        print(spatial_subgraph)
+
+        # Extract nodes for each layer
+        layer_nodes = {
+            i: [n for n, d in self.G.nodes(data=True) if d['id'] == i]
+            for i in range(1, self.spec.getHighestLayerId() + 1)
+        }
+
+        # Calculate positions for each layer separately
+        pos = {}
+        layer_height = 1 / (len(layer_nodes) + 1)
+
+        for layer, nodes in layer_nodes.items():
+            if not nodes:
+                continue
+            layer_graph = self.G.subgraph(nodes)
+            layer_pos = nx.spring_layout(layer_graph)
+            for n in layer_pos:
+                layer_pos[n][1] = layer_pos[n][1] * layer_height + (layer_height * (layer - 1))
+            pos.update(layer_pos)
+        
+        plt.figure(figsize=(12, 8))
+
+        # Draw spatial subgraph (layers 2 and 3)
+        edge_colors_sub = [get_edge_color(u, v) for u, v in spatial_subgraph.edges()]
+        nx.draw(spatial_subgraph, pos, with_labels=True, labels={n: str(n) for n in spatial_subgraph.nodes()}, 
+            node_color='lightblue', edge_color=edge_colors_sub, node_size=500, font_size=10)
+
+        # Draw higher layers if toggled on
+        for layer in show_layers:
+            if layer in layer_nodes:
+                layer_graph = self.G.subgraph(layer_nodes[layer])
+                layer_edges = layer_graph.edges()
+                layer_edge_colors = [get_edge_color(u, v) for u, v in layer_edges]
+                nx.draw(layer_graph, pos, with_labels=True, labels={n: str(n) for n in layer_nodes[layer]}, 
+                        node_color='orange', edge_color=layer_edge_colors, node_size=700, font_size=12, alpha=0.6)
+        
+        # Draw Layer 1 nodes if toggled on for a specific node in G_sub
+        if show_layer_1_for_node:
+            if show_layer_1_for_node in spatial_subgraph:
+                layer_1_nodes = list(self.G.successors(show_layer_1_for_node))
+                layer_1_graph = self.G.subgraph(layer_1_nodes)
+                layer_1_pos = nx.spring_layout(layer_1_graph)
+                for n in layer_1_pos:
+                    layer_1_pos[n][1] = layer_1_pos[n][1] * layer_height
+                    layer_1_pos[n][0] = pos[show_layer_1_for_node][0] + (layer_1_pos[n][0] - 0.5) * 0.2  # Adjust horizontally around parent
+                pos.update(layer_1_pos)
+                layer_1_edges = layer_1_graph.edges()
+                layer_1_edge_colors = [get_edge_color(u, v) for u, v in layer_1_edges]
+                nx.draw(layer_1_graph, pos, with_labels=True, labels={n: str(n) for n in layer_1_nodes}, 
+                        node_color='green', edge_color=layer_1_edge_colors, node_size=300, font_size=8, alpha=0.8)
+        
+        plt.title("Hierarchical Graph Visualization")
+        plt.savefig("imgs/osg.png")
     
 
 if __name__ == "__main__":
