@@ -498,20 +498,6 @@ class OpenSceneGraph:
 
         nodes = [node for node in self.G.nodes() if isPlaceConnector(node)]
         return self.G.subgraph(nodes)
-        
-        edges = [
-            (src, dst) for src, dst, data in self.G.edges(data=True)
-            if (
-                data['edge_type'] == "connects to" and 
-                isPlaceConnector(src) and 
-                isPlaceConnector(dst)
-            )
-        ]
-
-        print(self.G.edges(data=True))
-        print(self.G.nodes(data=True))
-        print(edges)
-        return self.G.edge_subgraph(edges)
     
     ### Visualisation utilities
     def visualise(self, show_layers=[], show_layer_1_for_node=None):

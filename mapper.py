@@ -15,7 +15,7 @@ from model_interfaces import (
     VLM_BLIPRefactor,
     VLM_GroundingDino,
 )
-from prompt_registry import PromptRegistry, PromptType
+from prompt_registry import PromptRegistry, Prompts
 from utils.string_utils import *
 from utils.logging_utils import draw_annotated_obs
 
@@ -45,7 +45,7 @@ class OSGMapper:
         """
         self.OSG = OpenSceneGraph(spec_str)
         self.spec = self.OSG.getSpec()
-        self.prompts = PromptRegistry(self.spec)
+        self.prompt_reg = PromptRegistry(self.spec)
 
         # Model interfaces
         self.llm = models["llm"]
@@ -95,9 +95,8 @@ class OSGMapper:
         observable_classes = self.spec.getLayerClasses(2) + ["object"]
         has_multiple_place_classes = len(self.spec.getLayerClasses(3)) > 1
         if has_multiple_place_classes:
-            place_class_prompt, place_class_validate_fn = self.prompts.getPrompt(
-                PromptType.PLACE_CLASS
-            )
+            place_class_prompt, place_class_validate_fn = self.prompt_reg.getPromptAndHandler(
+                Prompts.PlaceClass)
 
         for view, data in obs.items():
             if view == "info":
@@ -110,8 +109,8 @@ class OSGMapper:
                     img, place_class_prompt, place_class_validate_fn)
             else:
                 place_class = self.spec.getLayerClasses(3)[0]
-            place_prompt, place_validate_fn = self.prompts.getPrompt(
-                PromptType.LABEL_PLACE, place_class)
+            place_prompt, place_validate_fn = self.prompt_reg.getPromptAndHandler(
+                Prompts.LabelPlace, place_class)
             place_label = self.vqa.query(img, place_prompt, place_validate_fn)
             
             # Do open-set object detection on entire image
@@ -136,8 +135,8 @@ class OSGMapper:
             
         # Classify objects and connectors in a map that looks like:
         # {"Place1": [...], "Connector1": [...], "Connector2": [...], ...}
-        classify_prompt, classify_handle_resp_fn = self.prompts.getPrompt(
-            PromptType.SCENE_ELEMENT_CLASSIFICATION, combined_obdet_labels)
+        classify_prompt, classify_handle_resp_fn = self.prompt_reg.getPromptAndHandler(
+            Prompts.SceneElementClassification, combined_obdet_labels)
         valid, classify_resp = self.llm.query(
             classify_prompt,
             classify_handle_resp_fn,
@@ -170,8 +169,8 @@ class OSGMapper:
                 filtered_elem2class.append(c)
                 filtered_obdet2view.append(obdet_to_view[idx])
 
-        desc_prompts, desc_handle_resp_fn = self.prompts.getPrompt(
-            PromptType.APPEARANCE_DESCRIPTION, 
+        desc_prompts, desc_handle_resp_fn = self.prompt_reg.getPromptAndHandler(
+            Prompts.AppearanceDescription, 
             (class_to_object_map, combined_obdet_labels)
         )
         parsed_attrs = self.vqa.query(
@@ -256,8 +255,8 @@ class OSGMapper:
                 object_feats = self.OSG.getNodeObjectFeatures(place_node)
                 place_desc = self._makePlaceDescription({"forward": object_feats})
                 match_prompt_ctx['candidate'] = place_desc
-                match_prompt, match_handle_resp_fn = self.prompts.getPrompt(
-                    PromptType.PAIRWISE_PLACE_MATCHING, match_prompt_ctx)
+                match_prompt, match_handle_resp_fn = self.prompt_reg.getPromptAndHandler(
+                    Prompts.PairwisePlaceMatching, match_prompt_ctx)
                 valid, match_resp = self.llm.query(
                     match_prompt,
                     match_handle_resp_fn,
@@ -429,8 +428,8 @@ class OSGMapper:
                             for node in existing_nodes
                         }
                         nlabels = [flattened_labels[nidx] for nidx in nidxs]
-                        assoc_prompt, assoc_handle_resp_fn = self.prompts.getPrompt(
-                            PromptType.OBJECT_DATA_ASSOCIATION, ctx={
+                        assoc_prompt, assoc_handle_resp_fn = self.prompt_reg.getPromptAndHandler(
+                            Prompts.ObjectDataAssociation, ctx={
                                 "obs": (lbl, nlabels),
                                 "nodes": existing_nodes_and_feats,
                         })
