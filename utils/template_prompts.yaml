@@ -1,18 +1,18 @@
-PLACE_CLASS:
+PlaceClass:
   ctx: ~
   fewshot: ~
   query: Which of the place types {place_classes} best describes the scene?
-LABEL_PLACE:
+LabelPlace:
   ctx: ~
   fewshot: ~
   query: What {place_class} are we in?
-APPEARANCE_DESCRIPTION:
+AppearanceDescription:
   ctx: ~
   fewshot: ~
   query:
     - What color is the {object_name} in the image?
     - What material is the {object_name} made of?
-SCENE_ELEMENT_CLASSIFICATION:
+SceneElementClassification:
   ctx: ~
   fewshot:
     user_1: >
@@ -32,12 +32,12 @@ SCENE_ELEMENT_CLASSIFICATION:
   query: 'There is a list: {obj_conn_list}\n
           Please eliminate redundant strings in the element from the list and classify them into the classes: {queried_classes}. Ignore floor, ceiling and wall. Keep the number in the name.\n
           Answer:'
-PLACE_LABEL_SIMILARITY:
+PlaceLabelSimilarity:
   ctx: ~
   fewshot: ~
   query: >
     'In the scene, there are {all_place_labels}. Now, I need to find a "livingroom". Please give me all the {place_class} with similar semantic meaning from the list. Please directly return the answer in a Python list. Follow the format: Answer: <your answer>.'
-PAIRWISE_PLACE_MATCHING:
+PairwisePlaceMatching:
   ctx: >
     'You are a robot exploring an environment for the first time. You will be given an object to look for and should provide guidance on where to explore based on a series of observations. Observations will be given as descriptions of objects seen from four cameras in four directions. Your job is to estimate the robot''s state. You will be given two descriptions, and you need to decide whether these two descriptions describe the same {place_class}. For example, if we have visited the {place_class} before and got one description, when we visit a similar {place_class} and get another description, it is your job to determine whether the two descriptions represent the same {place_class}. You should understand that descriptions may contain errors and noise due to sensor noise and partial observability. Always provide reasoning along with a deterministic answer. If there are no suitable answers, leave the space after "Answer: None."" Always include: Reasoning: <your reasoning> Answer: <your answer>.'
   fewshot:
@@ -75,7 +75,7 @@ PAIRWISE_PLACE_MATCHING:
     'Depiction1: {observed_place_description}\n
     Depiction2: {candidate_place_description}\n
     These are depictions of what I observe from two different vantage points. Please tell me if these two viewpoints correspond to the same {place_class}. It's important to note that the descriptions may originate from two positions within the {place_class}, each with a distinct angle. Therefore, the descriptions may pertain to the same {place_class} but not necessarily capture the same elements. Please be aware that my viewing angle varies, so it is not necessary for the elements to align in the same direction. As long as the relative positions between objects are accurate, it is considered acceptable. Please assess the arrangement of objects and identifiable features in the descriptions to determine whether these two positions are indeed in the same {place_class}. Provide a response of True or False, along with supporting reasons.'
-OBJECT_DATA_ASSOCIATION:
+ObjectDataAssociation:
   ctx: ~
   fewshot: 
     user_1: >
