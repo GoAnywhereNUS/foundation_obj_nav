@@ -80,7 +80,7 @@ class Navigator:
         # Visualisation
         self.visualisation = visualise 
         self.visualiser = Visualiser() if self.visualisation else None
-        self.vis_image = np.ones((100, 100, 3))
+        self.vis_image = None#np.ones((100, 100, 3))
 
     def reset(self):
         # Reset scene graph
@@ -250,9 +250,14 @@ class Navigator:
             image = images[view]
             image = Image.fromarray(image)
             location = self.query_vqa(image, "Which room is the photo?")
+            
             image_locations[view] = (
                 location.replace(" ", "") #clean space between "living room"
             )
+
+            # just for debugging. TODO: delete this line
+            if view == 'rear':
+                image_locations[view] = image_locations['forward']
 
             if self.GT: # Load Ground Truth Object Detection
                 bbox_lst = []
@@ -350,7 +355,7 @@ class Navigator:
             whole_query = start_question + discript + end_question
         elif query_type == 'local':
             start_question = "There is a list:"
-            end_question = f"Please select one object that is most likely located near a {goal}. Please only select one object in the list and use this element name in answer. Use the exact name in the list. Always follow the format: Answer: <your answer>."
+            end_question = f"Please select one object that is most likely located near a {goal}. Please only select one object in the list and use this element name in answer. Don't reply there is no item related to the goal. Use the exact name in the list. Always follow the format: Answer: <your answer>."
             whole_query = start_question + discript + end_question
         elif query_type == 'state_estimation':
             discript1 = "Depiction1: "
@@ -373,7 +378,7 @@ class Navigator:
             discript2 = " .Now we have seen the following object: "
             for i, name in enumerate(candidate_entrances):
                 discript2 += f" {name} that is near " + ", ".join(candidate_entrances_feature[i]) +". "
-            question = "Please select one object that is most likely to be the object I want to find. Please only select one object and use this element name in answer. Use the exact name in the given sentences. Always follow the format: Answer: <your answer>."
+            question = "Please select one object that is most likely to be the object I want to find. Please only select one object and use this element name in answer. Use the exact name in the given sentences. Always follow the format: Reasoning: <your reasons`>.Answer: <your answer>."
             whole_query = discript1 + discript2 + question
         elif query_type == 'check_goal':
             start_question = "There is a list:"
@@ -398,6 +403,8 @@ class Navigator:
                    from the VLM.
         """
 
+        start = time.time()
+
 
         cropped_img_lst = []
         cleand_sensor_dir = []
@@ -413,7 +420,7 @@ class Navigator:
                 cleaned_object_lst.append(obj)
 
         est_state = None
-
+        print('update module time', time.time() - start)
         obj_label_descript = self.query_detailed_descript(cleaned_object_lst, cropped_img_lst)
         room_descript = {}
         locations = []
@@ -422,10 +429,15 @@ class Navigator:
         for i, label in enumerate(obj_label_descript):
             room_descript[cleand_sensor_dir[i]].append(label)
 
+        print('update module time after blip', time.time() - start)
         # TODO: add weight on differentt direction based on object num in each direction
             
         room_lst_scene_graph = self.scene_graph.get_secific_type_nodes('room')
         all_room = [room[:room.index('_')] for room in room_lst_scene_graph]
+
+        print('update module time after get familiar place', time.time() - start)
+
+        print('check',O_det['obs_location'] in all_room)
         # if current room is already in scene graph
         if O_det['obs_location'] in all_room:
             indices = [index for index, element in enumerate(all_room) if element == O_det['obs_location']]
@@ -450,6 +462,7 @@ class Navigator:
                 if is_similar:
                     est_state = similar_room
                     break
+        print('update module time after match familiar place', time.time() - start)
         return est_state, room_descript
     
     def ClassifyLayers(self, obj_label):
@@ -611,6 +624,9 @@ class Navigator:
 
         # TODO: Need panaromic view to estimate state
         
+        start = time.time()
+
+
         obj_label = []
         cropped_imgs = []
         locations = []
@@ -630,10 +646,24 @@ class Navigator:
         O_det = {'idx_sensordirection':idx_sensordirection, 'cropped_imgs':cropped_imgs, 'obj_bbox':obj_bbox, 'obj_label':obj_label, 'obs_location':obs_location}
 
         node_lst = self.ClassifyLayers(obj_label)
+
+
+        print('OSG CLassify layers time:', time.time()-start)
+
+
+
         print('-------------  State Estimation --------------')
         est_state, room_description = self.estimate_state(node_lst, O_det)
+        
+        print('OSG estimate state time1:', time.time()-start)
+
         print('Room Description', room_description) 
         print("State Estimation:", est_state)
+        
+        Updated_Nodes = None
+
+        print('OSG estimate state time2:', time.time()-start)
+
 
         if est_state == None:
             last_state = self.current_state
@@ -648,10 +678,15 @@ class Navigator:
             Updated_Nodes = self.UpdateLeafNodes(node_lst, O_det, to_be_updated_nodes, to_be_updated_nodes_feat)
         
         O_det_mapping = self.AddLeafNodes(node_lst, O_det)
+        print('OSG Add leaf time:', time.time()-start)
 
-        if est_state != None:
+        if est_state != None and Updated_Nodes is not None:
             for update_pair in Updated_Nodes:
                 self.scene_graph.combine_node(update_pair[0], O_det_mapping[update_pair[1]]) #TODO: update_pair has changed the idx
+
+
+        print('OSG Update existing node time:', time.time()-start)
+
 
         # TODO: Region Abstraction Update
         ####
@@ -780,6 +815,22 @@ class Navigator:
             plan: list of node name from current state to goal state;
                   if already in the goal room, return object list that is most likely near goal
         '''
+        
+        
+        # invalid plan
+        active_item = self.scene_graph.get_related_codes(self.current_state, 'contains', active_flag = True)
+        self.last_subgoal = random.choice(active_item)
+        path = [self.last_subgoal]
+        self.path = path
+        return path
+
+
+
+
+
+
+        start = time.time()
+
 
         print('goal', self.goal)
 
@@ -797,7 +848,10 @@ class Navigator:
                 self.last_subgoal = path[0]
         else:
             self.last_subgoal = path[1]
-        
+            if self.scene_graph.is_type(self.last_subgoal, 'room'): #TODO: add local exploration here
+                path = self.GoalProposer()
+                self.last_subgoal = path[0]
+ 
         self.path = path
         self.action_logging.write(f'[PLAN INFO] Path:{self.path}\n')
         self.action_logging.write(f'[Last Subgoal] Path:{self.last_subgoal}\n')
@@ -808,6 +862,7 @@ class Navigator:
         self.action_logging.write(f'[Last Subgoal (Active)] Path:{self.last_subgoal}\n')
         self.action_logging.write(f'[Explored Node]:{self.explored_node}\n')
 
+        print('Planner time:', time.time()-start)
         return path
 
     def visualise_objects(self, obs, img_lang_obs):
@@ -907,7 +962,10 @@ class Navigator:
     def ground_plan_to_bbox(self):
         next_goal = self.last_subgoal
         print('Next Subgoal:', next_goal, self.scene_graph.scene_graph[next_goal])
-        next_position = self.scene_graph.get_node_attr(next_goal)['bbox'].type(torch.int64).tolist()
+        try:
+            next_position = self.scene_graph.get_node_attr(next_goal)['bbox'].type(torch.int64).tolist()
+        except:
+            breakpoint()
         cam_uuid = self.scene_graph.get_node_attr(next_goal)['cam_uuid']
         return next_goal, next_position, cam_uuid
 
@@ -948,15 +1006,15 @@ class Navigator:
             if self.visualisation:
                 self.visualise_objects(obs, img_lang_obs)
                 self.visualise_chosen_goal(obs, potential_next_pos, self.last_subgoal, potential_cam_uuid)
-                # self.vis_image = self.visualiser.visualise_obs(
-                #     obs,
-                #     img_lang_obs,
-                #     subgoal=(potential_cam_uuid, potential_next_pos)
-                # )
+                self.vis_image = self.visualiser.visualise_obs(
+                    obs,
+                    img_lang_obs,
+                    subgoal=(potential_cam_uuid, potential_next_pos)
+                )
 
             return potential_next_pos, potential_cam_uuid
 
-        # Update
+        # Updatee
         self.OSGUpdater(img_lang_obs)
         print('------------  Update Scene Graph   -------------')
         scene_graph_str = self.scene_graph.print_scene_graph(pretty=False,skip_object=False)
@@ -972,12 +1030,12 @@ class Navigator:
 
 
         if self.visualisation:
-            # print('Visualising processed', cam_uuid, next_position)
-            # self.vis_image = self.visualiser.visualise_obs(
-            #     obs, 
-            #     img_lang_obs, 
-            #     subgoal=(cam_uuid, next_position)
-            # )
+            print('Visualising processed', cam_uuid, next_position)
+            self.vis_image = self.visualiser.visualise_obs(
+                obs, 
+                img_lang_obs, 
+                subgoal=(cam_uuid, next_position)
+            )
             # print('Visualising scene graph')
             # self.vis_image = self.visualiser.visualise_scene_graph(self.vis_image, self.scene_graph)
             # print('Returning')

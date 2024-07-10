@@ -8,7 +8,7 @@ import sensor_msgs
 from utils.ros_utils import msg_to_pil, pil_to_msg
 
 from navigator import *
-from gnm_controller import GNMController
+#from gnm_controller import GNMController
 import cv2
 
 #for k, v in os.environ.items():
@@ -48,6 +48,7 @@ class NavigatorROS(Navigator):
         rospy.init_node('navigator', anonymous=True)
         self._controller = None
         if self.run_debug is None or self.run_debug == "pc":
+            from gnm_controller import GNMController
             self._controller = GNMController(
                 maintain_aspect=True
             )
@@ -80,7 +81,8 @@ class NavigatorROS(Navigator):
 
     def reset(self):
         super().reset()
-        self._controller.reset()
+        if self._controller is not None:
+            self._controller.reset()
 
     def _observe(self):
         """
@@ -141,7 +143,7 @@ class NavigatorROS(Navigator):
                         if self.visualisation and pause_after_pr:
                             rospy.loginfo("Paused...")
                             if self.vis_image is not None:
-                                cv2.imshow("Vis", self.vis_image)
+                                cv2.imshow("Vis", self.vis_image[:, :, ::-1])
                             key = cv2.waitKey(0)
                             if key == ord('r'):
                                 rospy.logwarn('Resetting!')
@@ -150,16 +152,17 @@ class NavigatorROS(Navigator):
                                 self.goal = goal
                                 start_task = False
 
-                        self._controller.set_subgoal_image(
-                            subgoal_image,
-                            original_image
-                        )
+                        if start_task:
+                            self._controller.set_subgoal_image(
+                                subgoal_image,
+                                original_image
+                            )
 
                 # TODO: Low-level perception-reasoning. Run all the time.
 
                 if self.visualisation:
                     self.vis_image = self.visualiser.visualise_live(self.vis_image, obs)
-                    cv2.imshow("Vis", self.vis_image)
+                    cv2.imshow("Vis", self.vis_image[:, :, ::-1])
 
             key = cv2.waitKey(50)
             if key == ord('q'):
@@ -176,8 +179,6 @@ class NavigatorROS(Navigator):
                 pause_after_pr = False
             elif key == ord('s'):
                 start_task = True
-            elif key == ord('k'):
-                start_task = False
 
             # rate.sleep()
 
@@ -190,20 +191,51 @@ class NavigatorROS(Navigator):
 
         while not rospy.is_shutdown():
             obs = self._observe()
+
             if obs is not None:
+                #breakpoint()
                 if not active:
+                    """
+                    Rotate
+                    """
+
+                    #obs= None
+                    
+                    self.visualiser.set_live_stream_id('forward')
+                    
+                    print('[Notice] Start to collect obseravation!')
+                    for dir in ['forward', 'rear']:
+                        key = cv2.waitKey(0)
+                        
+                        if key == ord('g'):
+                            for cam_if, buf in self.image_buffer.items():
+                                #cam_id, buf = self.image_buffer.items()
+                                obs[dir] = np.array(msg_to_pil(buf[-1]))
+                            print(f'[Notice] {dir} is collected!' )
+                    if 'mid' in obs.keys():
+                        del obs['mid']
                     subgoal_image, cam_id = self.loop(obs)
                     active = True
-
+                
                 if self.visualisation and self.vis_image is not None:
+                    if 'forward' not in obs.keys():
+                        obs['forward'] = obs['mid']
                     self.vis_image = self.visualiser.visualise_live(self.vis_image, obs)
-                    
+            #breakpoint()        
+            if self.vis_image is None and obs is not None:
+                #print('Vis Image None!')
+                self.vis_image = self.visualiser.visualise_live(self.vis_image, obs)
             cv2.imshow("Vis", self.vis_image)
             key = cv2.waitKey(50)
             if key == ord('q'):
                 break
             elif key == ord('s'):
                 active = False
+            elif key == ord('r'):
+                goal = self.goal
+                self.reset()
+                self.goal = goal
+                active = True # Require that physically trigger 's' to start after reset
 
     def run_pc(self):
         """
@@ -325,6 +357,21 @@ if __name__ == "__main__":
     }
     """
 
-    node = NavigatorROS(scene_graph_specs=scene_graph_specs, run_debug=None)
-    node.goal = "armchair"
+    scene_graph_specs_with_door = """
+    {
+        "room": {
+            "contains": ["object"],
+            "connects to": ["entrance", "room"]
+        },
+        "entrance": {
+            "is near": ["object"],
+            "connects to": ["room"]
+        },
+        "object": {
+        },
+        "state": ["room"]
+    }
+    """
+    node = NavigatorROS(scene_graph_specs=scene_graph_specs, run_debug='pr')
+    node.goal = "fruit"
     node.run()
