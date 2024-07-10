@@ -1,6 +1,7 @@
 import torch
 import torchvision
 import numpy as np
+import time
 from functools import reduce
 from collections import Counter
 from typing import Any, Optional, Union
@@ -88,7 +89,8 @@ class OSGMapper:
                 im_crop is the image crop specified by the bounding box
                 neighbours is the list of obs_idx of nearby objects/connectors in current view
         """
-        import time; t1 = time.time()
+        print("##### Image parsing")
+        t1 = time.time()
         combined_obdet_bboxes, combined_obdet_labels, combined_obdet_crops = [], [], []
         obdet_to_view = []
         views = dict()
@@ -174,7 +176,7 @@ class OSGMapper:
             (class_to_object_map, combined_obdet_labels)
         )
         
-        print("()()()", len(parsed_ims), len(parsed_labels), len(parsed_bboxes))
+        print("***** DBG:", len(parsed_ims), len(parsed_labels), len(parsed_bboxes))
         parsed_attrs = [] if len(parsed_ims) == 0 else self.vqa.query(
             parsed_ims, desc_prompts, desc_handle_resp_fn, prompts_per_image=2)
 
@@ -193,7 +195,6 @@ class OSGMapper:
             flattened_bboxes = [
                 bbox for objs in objects.values() for _, _, bbox, _ in objs
             ]
-            print(f"##### View: {view}")
             nidxs = self._getNeighboursInImage(flattened_bboxes)
 
             obs_idx = 0
@@ -205,7 +206,7 @@ class OSGMapper:
                 views[view]["objects"][cls] = cls_objs
 
         t5 = time.time()
-        print("Timing:", t2 - t1, t3 - t2, t4 - t3, t5 - t4)
+        print("***** Timing:", t2 - t1, t3 - t2, t4 - t3, t5 - t4)
 
         if self.logging["obs"]:
             draw_annotated_obs(views, obs)
@@ -223,7 +224,9 @@ class OSGMapper:
         Output: curr_state, predicted Place in OSG currently occupied by agent,
                             or None if no matching Place is found in OSG
         """
-        print("State estimation")
+        print("##### State estimation")
+        t1 = time.time()
+
         # Get label of current observed Place
         class_and_label = [
             (data["place_class"], data["place"]) for _, data in views.items()
@@ -248,9 +251,12 @@ class OSGMapper:
             shortest_path_lengths = self.OSG.getShortestPathLengths(
                 prev_state, similar_place_nodes)
             sorted_idxs = np.argsort(shortest_path_lengths) # increasing dist to last known state 
+            t2 = time.time()
+            print("***** Timing:", t2 - t1)
             
             # Pairwise Place matching
             for idx in sorted_idxs:
+                t3 = time.time()
                 if np.isinf(shortest_path_lengths[idx]):
                     break
                 place_node = similar_place_nodes[idx]
@@ -264,7 +270,9 @@ class OSGMapper:
                     match_handle_resp_fn,
                     required_samples=5,
                 )
-                print(valid, match_resp)
+                t4 = time.time()
+                print("***** Timing:", t4 - t3)
+                print("***** Pairwise Place Match:", place_node, valid, match_resp)
                 if (
                     valid and
                     Counter(match_resp).most_common(1)[0][0] # consensus is a match
@@ -282,20 +290,20 @@ class OSGMapper:
         """
         Integrates new observations into the OSG
         """
-        print(est_state)
-        print("OSG updating")
-        print("*********", path)
+        print("##### OSG updating")
+        print("***** Est. state:", est_state)
+        print("***** Path:", path)
+        t1 = time.time()
 
         object_nodes = dict()
         if isinstance(est_state, tuple):
             # Currently in an unrecognisable location. Check against the
             # OSG specification to see if this location can be connected back
             # to the current OSG.
+            print("***** In novel Place!")
             place_class, place_label = est_state
-            print("^^^", path, place_class, place_label)
             if len(path) > 0:
                 last_path_node = path[-1]
-                print(self.spec.isConnectable(place_class, last_path_node.node_cls))
                 if not self.spec.isConnectable(place_class, last_path_node.node_cls):
                     raise Exception(
                         f"""Invalid spatial structure encountered! {place_class}
@@ -341,6 +349,7 @@ class OSGMapper:
         else:
             # Revisiting a previously seen Place in the OSG. Update nodes here.
             assert self.OSG.isPlace(est_state), "Given state is not a Place node!"
+            print("***** In existing node", est_state)
 
             associations = self._associateObservationsWithNodes(views, est_state)
             nodes_neighbours_map = dict()
@@ -389,6 +398,8 @@ class OSGMapper:
             for node, neighbours in nodes_neighbours_map.items():
                 self.OSG.addEdges(node, neighbours, "is near")
             
+        t2 = time.time()
+        print("***** Timing:", t2 - t1)
         return est_state, object_nodes
     
     def visualiseOSG(self, est_state):

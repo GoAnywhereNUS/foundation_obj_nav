@@ -230,8 +230,24 @@ class NavigatorHomeRobot(Navigator):
             # paused and are awaiting next instructions.
             subgoal_position = None
             if not self.controller_active:
-                preprocessed_obs = {'forward': obs['forward_rgb'], 'right': obs['right_rgb'], 'left': obs['left_rgb'], 'rear': obs['rear_rgb'], 'info':{'forward_depth':obs['forward_depth'], 'left_depth':obs['left_depth'], 'right_depth':obs['right_depth'], 'rear_depth':obs['rear_depth'],'forward_semantic':obs['forward_semantic'], 'left_semantic':obs['left_semantic'], 'right_semantic':obs['right_semantic'], 'rear_semantic':obs['rear_semantic'] } } 
+                preprocessed_obs = {
+                    'forward':  {'image': obs['forward_rgb']}, 
+                    'right':    {'image': obs['right_rgb']}, 
+                    'left':     {'image': obs['left_rgb']}, 
+                    'rear':     {'image': obs['rear_rgb']}, 
+                    'info':     {
+                        'forward_depth':    obs['forward_depth'], 
+                        'left_depth':       obs['left_depth'], 
+                        'right_depth':      obs['right_depth'], 
+                        'rear_depth':       obs['rear_depth'],
+                        'forward_semantic': obs['forward_semantic'], 
+                        'left_semantic':    obs['left_semantic'], 
+                        'right_semantic':   obs['right_semantic'], 
+                        'rear_semantic':    obs['rear_semantic'] 
+                    }
+                }
                 subgoal_position, cam_uuid = self.loop(preprocessed_obs)
+                print(">>> Loop ended")
                 if self.check_goal(self.last_subgoal) and self.success_flag:
                     self.action_logging.write(f"[END]: SUCCESS Checked! \n")
                     break
@@ -243,6 +259,7 @@ class NavigatorHomeRobot(Navigator):
                         subgoal_position[1] += 150
                         subgoal_position[3] += 150
                     try:
+                        print("Setting image goal")
                         self.controller.set_subgoal_image(
                             subgoal_position,
                             cam_uuid + '_depth',
@@ -250,7 +267,8 @@ class NavigatorHomeRobot(Navigator):
                             get_camera_matrix(640, 480, 90)
                         )
                         self.controller_active = True
-                    except:
+                    except Exception as e:
+                        print(e)
                         self.action_logging.write(f'ERROR: Cannot set subgoal to controller {subgoal_position}\n')
                         self.llm_loop_iter += 1
             # Low-level perception-reasoning. Run all the time.
@@ -261,6 +279,7 @@ class NavigatorHomeRobot(Navigator):
             # to navigate with the controller
 
             if self.controller_active:
+                print("Controller active")
                 action, success = self.controller.step()
                 print('Control', action, success)
                 if action is None:

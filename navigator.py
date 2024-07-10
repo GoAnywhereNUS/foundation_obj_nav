@@ -9,6 +9,8 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import torch
 
+from mapper import OSGMapper
+
 from scene_graph import SceneGraph, default_scene_graph_specs
 from model_interfaces import GPTInterface, VLM_BLIP, VLM_GroundingDino
 from utils.vis_utils import Visualiser
@@ -93,6 +95,10 @@ class Navigator:
         self.visualisation = visualise 
         self.visualiser = Visualiser() if self.visualisation else None
         self.vis_image = np.ones((100, 100, 3))
+
+        self.mapper = OSGMapper()
+
+        self.tmp_path = []
 
     def reset(self):
         # Reset scene graph
@@ -405,7 +411,7 @@ class Navigator:
             room_descript[direction] = []
         for i, label in enumerate(obj_label_descript):
             room_descript[cleand_sensor_dir[i]].append(label)
-            
+        
         room_lst_scene_graph = self.scene_graph.get_secific_type_nodes('room')
         all_room = [room[:room.index('_')] for room in room_lst_scene_graph]
         # if current room is already in scene graph
@@ -590,7 +596,6 @@ class Navigator:
         Return:
             state: agent's current state as dict, e.g. {'floor': xxx, 'room': xxx, ...}
         """
-
         obj_label = []
         cropped_imgs = []
         locations = []
@@ -928,62 +933,99 @@ class Navigator:
             plt.clf()
 
     def loop(self, obs):
-        """
-        Single iteration of high-level perception-reasoning loop for navigation.
+        print(">>>>> Decision-making")
+        print("Goal:", self.goal, "| Path", self.tmp_path)
+        parsed = self.mapper.parseImage(obs)
+        prev_state = None if len(self.tmp_path) == 0 else self.tmp_path[-1]
+        state = self.mapper.estimateState(prev_state, parsed)
+        state, object_nodes = self.mapper.updateOSG(state, self.tmp_path, parsed)
+        self.mapper.visualiseOSG(state)
 
-        Returns:
-            None
-        """
-        self.llm_loop_iter += 1
+        if len(self.tmp_path) == 0 or state != self.tmp_path[-1]:
+            self.tmp_path.append(state)
+        
+        while True:
+            try:
+                selected_goal = input('Please provide the selected goal as <view> <bbox_id>, e.g. forward 2:\n')
+                print(f"Got: {selected_goal}")
+                if selected_goal.strip().lower() == "q":
+                    import sys; sys.exit(0)
+                
+                view, bbox_id = selected_goal.split(' ')
+                bbox_id = int(bbox_id)
+                valid = (view in object_nodes) and len(object_nodes[view]) > bbox_id
+                if valid:
+                    break
+            except:
+                pass
 
-        # Observe
-        self.action_logging.write(f'--------- Loop {self.llm_loop_iter} -----------\n')
-        print('------------  Receive Lang Obs   -------------')
-        img_lang_obs = self.perceive(obs)
-
-        find_goal_flag, potential_next_pos, potential_cam_uuid = self.check_current_obs(obs, img_lang_obs)
-        if find_goal_flag:
-            if self.visualisation:
-                self.visualise_objects(obs, img_lang_obs)
-                self.visualise_chosen_goal(obs, potential_next_pos, self.last_subgoal, potential_cam_uuid)
-                # self.vis_image = self.visualiser.visualise_obs(
-                #     obs,
-                #     img_lang_obs,
-                #     subgoal=(potential_cam_uuid, potential_next_pos)
-                # )
-
-            return potential_next_pos, potential_cam_uuid
-
-        # Update
-        self.OSGUpdater(img_lang_obs)
-        print('------------  Update Scene Graph   -------------')
-        scene_graph_str = self.scene_graph.print_scene_graph(pretty=False,skip_object=False)
-        self.action_logging.write(f'Scene Graph: {scene_graph_str}\n')
-        print(scene_graph_str)
-
-        # Plan
-        print('-------------  Plan Path --------------')
-        path = self.Planner()
-        self.is_navigating = True
-        next_goal, next_position, cam_uuid = self.ground_plan_to_bbox()
-        self.action_logging.write(f'Path: {path}, Next Goal: {next_goal}\n')
+        selected_node, selected_bbox = object_nodes[view][bbox_id]
+        if self.mapper.OSG.isConnector(selected_node):
+            self.tmp_path.append(selected_node) # Hack to add connectors
+        selected_bbox = tuple(map(lambda x: int(np.floor(x)), selected_bbox))
+        print(selected_node, selected_bbox, view)
+        print(">>>>>")
+        self.last_subgoal = self.tmp_path
+        return selected_bbox, view
 
 
-        if self.visualisation:
-            # print('Visualising processed', cam_uuid, next_position)
-            # self.vis_image = self.visualiser.visualise_obs(
-            #     obs, 
-            #     img_lang_obs, 
-            #     subgoal=(cam_uuid, next_position)
-            # )
-            # print('Visualising scene graph')
-            # self.vis_image = self.visualiser.visualise_scene_graph(self.vis_image, self.scene_graph)
-            # print('Returning')
+    # def loop(self, obs):
+    #     """
+    #     Single iteration of high-level perception-reasoning loop for navigation.
 
-            self.visualise_objects(obs, img_lang_obs)
-            self.visualise_chosen_goal(obs, next_position, next_goal, cam_uuid)
+    #     Returns:
+    #         None
+    #     """
+    #     self.llm_loop_iter += 1
 
-        return next_position, cam_uuid 
+    #     # Observe
+    #     self.action_logging.write(f'--------- Loop {self.llm_loop_iter} -----------\n')
+    #     print('------------  Receive Lang Obs   -------------')
+    #     img_lang_obs = self.perceive(obs)
+
+    #     find_goal_flag, potential_next_pos, potential_cam_uuid = self.check_current_obs(obs, img_lang_obs)
+    #     if find_goal_flag:
+    #         if self.visualisation:
+    #             self.visualise_objects(obs, img_lang_obs)
+    #             self.visualise_chosen_goal(obs, potential_next_pos, self.last_subgoal, potential_cam_uuid)
+    #             # self.vis_image = self.visualiser.visualise_obs(
+    #             #     obs,
+    #             #     img_lang_obs,
+    #             #     subgoal=(potential_cam_uuid, potential_next_pos)
+    #             # )
+
+    #         return potential_next_pos, potential_cam_uuid
+
+    #     # Update
+    #     self.OSGUpdater(img_lang_obs)
+    #     print('------------  Update Scene Graph   -------------')
+    #     scene_graph_str = self.scene_graph.print_scene_graph(pretty=False,skip_object=False)
+    #     self.action_logging.write(f'Scene Graph: {scene_graph_str}\n')
+    #     print(scene_graph_str)
+
+    #     # Plan
+    #     print('-------------  Plan Path --------------')
+    #     path = self.Planner()
+    #     self.is_navigating = True
+    #     next_goal, next_position, cam_uuid = self.ground_plan_to_bbox()
+    #     self.action_logging.write(f'Path: {path}, Next Goal: {next_goal}\n')
+
+
+    #     if self.visualisation:
+    #         # print('Visualising processed', cam_uuid, next_position)
+    #         # self.vis_image = self.visualiser.visualise_obs(
+    #         #     obs, 
+    #         #     img_lang_obs, 
+    #         #     subgoal=(cam_uuid, next_position)
+    #         # )
+    #         # print('Visualising scene graph')
+    #         # self.vis_image = self.visualiser.visualise_scene_graph(self.vis_image, self.scene_graph)
+    #         # print('Returning')
+
+    #         self.visualise_objects(obs, img_lang_obs)
+    #         self.visualise_chosen_goal(obs, next_position, next_goal, cam_uuid)
+
+    #     return next_position, cam_uuid 
 
     def run(self):
         """
