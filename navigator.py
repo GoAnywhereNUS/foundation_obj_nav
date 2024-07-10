@@ -8,7 +8,12 @@ import matplotlib.pyplot as plt
 from mapper import OSGMapper
 
 class Navigator:
-    def __init__(self):
+    def __init__(
+        self,
+        scene_graph_specs="", 
+        llm_config_path="",
+        visualise=True,
+    ):
         # TODO: Review these variables and parameters.
         self.defined_entrance = ['door', 'doorway', 'doorframe', 'window']
         self.mapper = OSGMapper()
