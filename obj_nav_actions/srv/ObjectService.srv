@@ -1,0 +1,4 @@
+sensor_msgs/Image image
+string[] additional_tags
+---
+string[] detected_objects

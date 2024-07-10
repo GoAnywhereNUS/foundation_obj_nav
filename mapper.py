@@ -11,10 +11,14 @@ from open_scene_graph import (
     OpenSceneGraph,
     default_scene_graph_specs,
 )
+
 from model_interfaces import (
-    GPTInterfaceRefactor,
-    VLM_BLIPRefactor,
-    VLM_GroundingDino,
+    LLMInterface,
+    VQAPerception,
+    ObjectPerception,
+    ModelLLMDriver_GPT,
+    ModelVQADriver_BLIP,
+    ModelObjectDriver_GroundingDINO,
 )
 from prompt_registry import PromptRegistry, Prompts
 from utils.string_utils import *
@@ -34,9 +38,9 @@ class OSGMapper:
     def __init__(
         self, 
         models={
-            "llm" : GPTInterfaceRefactor(),
-            "vqa" : VLM_BLIPRefactor(),
-            "obdet" : VLM_GroundingDino(),
+            "llm" : ModelLLMDriver_GPT,
+            "vqa" : ModelVQADriver_BLIP,
+            "obdet" : ModelObjectDriver_GroundingDINO,
         },
         spec_str=default_scene_graph_specs,
         logging=True,
@@ -49,9 +53,9 @@ class OSGMapper:
         self.prompt_reg = PromptRegistry(self.spec)
 
         # Model interfaces
-        self.llm = models["llm"]
-        self.vqa = models["vqa"]
-        self.obdet = models["obdet"]
+        self.llm = LLMInterface(models["llm"]())
+        self.vqa = VQAPerception(models["vqa"]())
+        self.obdet = ObjectPerception(models["obdet"]())
 
         # Hyperparams
         # TODO: Read in from config file

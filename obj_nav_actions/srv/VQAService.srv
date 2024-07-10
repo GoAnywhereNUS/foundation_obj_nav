@@ -1,0 +1,5 @@
+sensor_msgs/Image[] images
+string[] prompts
+int32 prompts_per_image
+---
+string[] answers

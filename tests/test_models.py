@@ -1,4 +1,4 @@
-from ..model_interfaces import *
+from ..model_interfaces_old import *
 
 if __name__ == "__main__":
     import pdb
