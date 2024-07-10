@@ -29,230 +29,54 @@ tag2text = importlib.import_module("Grounded-Segment-Anything.Tag2Text.models.ta
 inference_ram = importlib.import_module("Grounded-Segment-Anything.Tag2Text.inference_ram")
 sys.path.remove(tag2text_path)
 
-# LLAVA
-try:
-    from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
-    from llava.conversation import conv_templates, SeparatorStyle
-    from llava.model.builder import load_pretrained_model
-    from llava.utils import disable_torch_init
-    from llava.mm_utils import process_images, tokenizer_image_token, get_model_name_from_path, KeywordsStoppingCriteria
-    print('Loading LLAVA')
-except:
-    print('Not Loading LLAVA.')
+######## Abstract driver classes ########
 
-
-######## Interface classes ########
-class LLMInterface:
+class BaseLLMDriver:
     def __init__(self):
-        self.log_path = None
+        self.device = torch.device('cuda')
 
     def reset(self):
-        """
-        Resets state of the planner, including clearing LLM context
-        """
-        raise NotImplementedError
-
-
-class VQAPerception:
+        raise NotImplementedError("Subclasses to implement this method")
+    
+    def send_query(self, prompt: str, required_samples: int):
+        raise NotImplementedError("Subclasses to implement this method")
+    
+class BaseVQADriver:
     def __init__(self):
-        self.device = torch.device("cuda")
-        self.model = None
-        self.image_preprocessors = None
-        self.text_preprocessors = None
+        self.device = torch.device('cuda')
 
-    def query(self, image, question_prompt):
-        """
-        Input:
-            image: PIL image type
-            question_prompt: String, eg: "Where is the photo taken?"
-        
-        Return:
-            string
-        """
-        raise NotImplementedError
+    def reset(self):
+        raise NotImplementedError("Subclasses to implement this method")
     
-
-class ObjectPerception:
+    def send_query(
+        self,
+        image_input: Union[Image.Image, list],
+        prompt_input: Union[str, list],
+        prompts_per_image: int,
+    ):
+        raise NotImplementedError("Subclasses to implement this method")
+    
+class BaseObjectDriver:
     def __init__(self):
-        self.device = torch.device("cuda")
+        self.device = torch.device('cuda')
 
-    def detect_all_objects(self, image, filter=False):
-        """
-        Input:
-            image: PIL image type
-        Return:
-            list of bounding boxes
-        """
-        object_detections = self._detect_objects(image)
-        if filter:
-            return self._filter(object_detections)
-        return object_detections
+    def reset(self):
+        raise NotImplementedError("Subclasses to implement this method")
     
-    def detect_specific_objects(self, image, object_list, filter=False):
-        """
-        Input:
-            image: PIL image type
-            object_list: List of String describing objects to find, eg: ["door, "exit", ...]
-        Return:
-            list of bounding boxes
-        """
-        assert len(object_list) > 0, "If not detecting specific objects, use detect_all_objects"
-        additional_tags = reduce(lambda a, b: a + ", " + b, object_list)
-        object_detections = self._detect_objects(image, additional_tags)
-        if filter:
-            return self._filter(object_detections)
-        return object_detections
+    def send_query(
+        self,
+        image: Image.Image,
+        additional_tags: list[str],
+    ):
+        raise NotImplementedError("Subclasses to implement this method")
     
-    def _detect_objects(self, image, additional_tags):
-        raise NotImplementedError
+######## Driver classes that directly run models ########
 
-    def _filter(self, object_detections):
-        raise NotImplementedError
-  
-######## Foundation model instantiations ########
-
-USER_EXAMPLE_1 = """You see the partial layout of the apartment:
-{"room": {"livingroom_1", "connects to": ["door_1", "door_2"]}, "diningroom_1": {,"connects to": ["door_1"]}}, "entrance": {"door_1": {"is near": ["towel_1"], "connects to": ["livingroom_1", "diningroom_1"]}, "door_2": {"is near": [], "connects to": ["livingroom_1"]}}}
-Question: Your goal is to find a sink. If any of the rooms in the layout are likely to contain the target object, specify the most probable room name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found."""
-
-AGENT_EXAMPLE_1 = """Reasoning: There is only livingroom in the layout. livingroom is not likely to contain sink, so I will not explore the current room. Among all the doors, door1 is near to towel. A towel is usually more likely to near the bathroom or kitchen, so it is likely that if you explore door1 you will find a bathroom or kitchen and thus find a sink.
-Answer: door_1"""
-
-USER_EXAMPLE_2 = """You see the partial layout of the apartment:
-{"room": {"livingroom_1": {"connects to": ["doorway_1", "door_2"]}, "entrance": {"doorway_1": {"is near": ["table_1"]}, "door_2": {"is near": ["clock_1"], "connects to": ["livingroom_1" ]}}}
-Question: Your goal is to find a oven. If any of the rooms in the layout are likely to contain the target object, specify the most probable room name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found."""
-
-AGENT_EXAMPLE_2 = """Reasoning: There are only livingroom in the layout. Among all the rooms, livingroom is usually unlikely to contain oven, making it less likely for me to find oven in the current room. Instead, I plan to explore other rooms connected to current living room via entrances. Evaluating the entrances, doorway1 stands out as it is close to a table. Tables are commonly found in kitchens, which often contain ovens. Therefore, I have decided to explore through doorway_1.
-Answer: doorway_1"""
-
-USER_EXAMPLE_3 = """You see the partial layout of the apartment:
-{"room": {"kitchen_1": {"connects to": ["stair_1"]}, "livingroom": {"connects to": ["stair_1"]}, "entrance": {"stair_1": {"is near": []}}}}
-Question: Your goal is to find a sink. If any of the rooms in the layout are likely to contain the target object, specify the most probable room name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found."""
-
-AGENT_EXAMPLE_3 = """Reasoning: There are kitchen and livingroom in the layout. Among all the rooms, kitchen is usually likely to contain sink. Since we haven't explored the kitchen yet, it is possible that the sink is in the kitchen. Therefore, I will explore kitchen. 
-Answer: kitchen_1"""
-
-USER_EXAMPLE_4 = """You see the partial layout of the apartment:
-{"room": {"livingroom_1": {"connects to": []}}}
-Question: Your goal is to find a sink. If any of the rooms in the layout are likely to contain the target object, specify the most probable room name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found."""
-
-AGENT_EXAMPLE_4 = """Reasoning: There is only livingroom in the layout. livingroom is not likely to contain sink, but there is no entrance/door/doorway in the layout. Therefore, there is no entrance to explore, I have to reply the current room name.
-Answer: livingroom_1"""
-
-##############################
-
-CLS_USER_EXAMPLE_1 = """There is a list: ["livingroom_0", "hallway_1", "window_13","door_2", "door frame_18", "doorframe_3", "table_4","chair_5","livingroom sofa_6", "floor_7", "wall_8", "doorway_9", "stairs_10"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes. Ignore floor, ceiling and wall."""
-
-CLS_AGENT_EXAMPLE_1 = """Answer:
-room: livingroom_0
-entrance: door_2, doorframe_3, hallway_1, doorway_9, stairs_10, doorframe_18
-object: table_4, chair_5, sofa_6, window_13"""
-
-CLS_USER_EXAMPLE_2 = """There is a list: ["bathroom_0", "bathroom mirror_1","bathroom sink_2","toilet_3", "bathroom bathtub_4", "lamp_5", "ceiling_10"]. Please eliminate redundant strings in the element from the list and classify them into "room," "entrance," and "object" classes. Ignore floor, ceiling and wall."""
-
-CLS_AGENT_EXAMPLE_2 = """Answer:
-room: bathroom_0
-entrance: none
-object: mirror_1, sink_2, toilet_3, bathtub_4, lamp_5"""
-#############################
-
-LOCAL_EXP_USER_EXAMPLE_1 = """There is a list: ["mirror_2", "lamp_1", "picture_7", "tool_6","toilet_8","sofa_11", "floor_12", "wall_13"]. Please select one object that is most likely located near a sink. Always follow the format: Answer: <your answer>."""
-
-LOCAL_EXP_AGENT_EXAMPLE_1 = """Reasoning: Among the given options, the object most likely located near a sink is a "mirror." Mirrors are commonly found near sinks in bathrooms for personal grooming and hygiene activities.
-Answer: mirror_2"""
-
-LOCAL_EXP_USER_EXAMPLE_2 = """There is a list: ["chair_4", "sofa_2", "bed_9", "dresser_1","ceiling_6","closet_5", "window_7", "wall_10"]. Please select one object that is most likely located near a table. Always follow the format: Answer: <your answer>."""
-
-LOCAL_EXP_AGENT_EXAMPLE_2 = """Reasoning: Among the given options, the object most likely located near a table is a "chair." Chairs are commonly placed around tables for seating during various activities such as dining, working, or socializing.
-Answer: chair_4"""
-
-#######################
-
-STATE_EST_USER_EXAMPLE_1 = """Description1: On the left, I can see a brown wood headboard, white paper pillow. On the right, I can see a black metal television, gray plastic laundry basket, white wood closet dresser, brown wood drawer. In fron of me, I can see a white wood bed, white wood window, brown metal lamp, brown wood dresser, brown wood dresser nightstand, black silk curtain, white plastic curtain, white metal wall lamp, brown wood drawer. Behind me, I can see a brown wood cabinet. 
-Description2: On the left, I can see a white wood door. On the right, I can see a white wood bed, white glass lamp, white glass window, white plastic curtain, brown wood dresser nightstand, white glass window, white wood nightstand, blue fabric curtain, white cotton pillow, white metal ceiling fan, silver metal wall lamp. In front of me, I can see a white glass lamp, brown wood headboard, white cotton pillow, brown wood dresser, white wood bed, white cotton pillow, red metal wall lamp door, brown wood drawer. Behind me, I can see a brown wood bureau, black glass television, brown wood stool, brown wood drawer, brown wood drawer, brown wood drawer.
-These are depictions of what I observe from two different vantage points. Please assess the shared objects and spatial relationship in the descriptions to determine whether these two positions are indeed in the same place. Provide a response of True or False, along with supporting reasons. In each direction, focus on only two to three large objects for reasoning.
-"""
-STATE_EST_AGENT_EXAMPLE_1 = """Reasoning: To simplify the description, given the abundance of objects, we initially focus on common perceptions of object sizes. Our attention is directed toward larger objects, as these are less prone to detection errors.
-Description 1: On the left, there is brown wood headboard, white paper pillow. On the right, black metal television, brown wood dresser, and white wood closet dresser are of relatively large size. In front of me, there is a white wood bed and a brown wood dresser. Behind me, I can see a brown wood cabinet and black silk curtain.
-Description 2: On the left, there is white wood door. On the right, the white wood bed, brown wood dresser, nightstand, and ceiling fan are of relatively large size. In front of me, there is a white wood bed, black glass television a brown wood dresser. Behind me, I can see a brown wood cabinet.
-Shared Large Objects: the two descriptions exhibit significant commonalities, prominently featuring large and easily observable items such as a brown wood dresser, a brown wood drawer, a white wood bed, a metal wall lamp, a television, and a brown wood headboard. Spatial Relationship: the spatial relationships within both descriptions remain consistent, with the dresser and wall lamp positioned near the bed in each scenario. Despite minor variations in the color or material of smaller objects like stools or curtains, these discrepancies appear more likely to stem from observational nuances rather than indicating distinct rooms. 
-Answer: True"""
-
-STATE_EST_USER_EXAMPLE_2 = """Description1: On the left, there is a silver metal faucet, white glass mirror, black metal wall lamp, white stainless steel sink, white formica countertop, blue plastic accessory, white wood white door, silver metal faucet, white metal wall lamp, brown wood cabinet, black wood white door doorway, brown wood cabinet, white wood mirror wall. On the right, there is a brown tile floor, white drywall ceiling. In front of me, there is a silver metal faucet, silver glass mirror, white soap soap, white porcelain sink, brown wood cabinet, white porcelain sink, silver metal wall lamp, silver metal wall lamp. At the rear, there is an orange glass lamp, brown wood floor, white porcelain tub, white cotton bed.
-Description2:  On the left, there is a white glass mirror, silver metal faucet, white porcelain sink, white wood bathroom sink, white wood bed, brown metal wall lamp. On the right, there are no specified items. In front of me, there is a silver metal faucet, white porcelain sink, white plastic toiletry, silver glass mirror, blue plastic soap toiletry, white white bathroom sink countertop, blue metal wall lamp, black wood bathroom cabinet, black metal wall lamp. Behind me, there is a white porcelain tub, black cloth curtain, white cotton bed, brown wood bed, black cloth curtain, white porcelain bath.
-These are depictions of what I observe from two different vantage points. Please assess the shared objects and spatial relationship in the descriptions to determine whether these two positions are indeed in the same place. Provide a response of True or False, along with supporting reasons. In each direction, focus on only two to three large objects for reasoning.
-"""
-
-STATE_EST_AGENT_EXAMPLE_2 = """Reasoning: To simplify the description, given the abundance of objects, we focus initially on common perceptions of larger objects, as they are less prone to detection errors.
-Description 1: On the left, there is brown wood cabinet, silver metal faucet, white wood bathroom sink, and white wood bed. On the right, there is nothing. In front of me, there is a silver metal faucet, silver glass mirror,white porcelain sink, brown wood cabinet, black mental wall lamp.  Behind me, there is an orange glass lamp, white porcelain tub, white cotton bed. 
-Description 2: On the left, there is white porcelain sink and white wood bed. On the right, there are nothing. In front of me, there is a silver mental faucet and white plastic toiletry. Behind me, I can see white porcelain tub, black cloth curtain, white cotton bed.
-Shared Large Objects: Both descriptions mention silver metal faucets, white beds, and sink, contributing to a consistent thematic presence. Spatial Relationship: The placement of key items like silver metal faucets and brown wood cabinets described in similar configurations create a sense of coherence. Potential for Small Errors: Description 2 lacks specified items, such as accessory, door and countertop. Besides, there are small errors in the material of bed. Errors in material or color, as well as the potential omission of small-size objects, can indeed be attributed to variations in observation. Despite this, the two descriptions are depicting the same room, with the potential for small errors accounting for minor variations.
-Answer: True"""
-
-STATE_EST_USER_EXAMPLE_3 = """Description1: On the left, there is a white wood dresser, white glass lamp, and a white glass window/door. On the right, there is a white wood chair and a silver metal wall lamp. In front of me, there is an incomplete description. Behind me, there is a purple wood bed, yellow wood ceiling fan, white wood dresser, and another white glass window.
-Description2: On the left, there is a white glass mirror, silver metal faucet, white porcelain sink, white wood bathroom sink, white wood bed, brown metal wall lamp. On the right, there are no specified items. In front of me, there is a silver metal faucet, white porcelain sink, white plastic toiletry, silver glass mirror, blue plastic soap toiletry, white white bathroom sink countertop, blue metal wall lamp, black wood bathroom cabinet, black metal wall lamp. Behind me, there is a white porcelain tub, black cloth curtain, white cotton bed, brown wood bed, black cloth curtain, white porcelain bath.
-These are depictions of what I observe from two different vantage points. Please assess the shared objects and spatial relationship in the descriptions to determine whether these two positions are indeed in the same place. Provide a response of True or False, along with supporting reasons. In each direction, focus on only two to three large objects for reasoning.
-"""
-
-STATE_EST_AGENT_EXAMPLE_3 = """Reasoning: To simplify the description, given the abundance of objects, we focus initially on common perceptions of larger objects, as they are less prone to detection errors.
-Description1: On the left, there is a white wood dresser, and a white glass window/door. On the right, there is a white wood chair and a silver metal wall lamp. In front of me, there is nothing. Behind me, there is a purple wood bed, yellow wood ceiling fan, white wood dresser.
-Description2: On the left, there is a silver metal faucet, white porcelain sink, white wood sink, white wood bed. On the right, there is nothing. In front of me, there is a silver metal faucet, white porcelain sink, white plastic toiletry. Behind me, there is a white porcelain tub, black cloth curtain, white cotton bed, white porcelain bath.
-Shared Large Objects: Both descriptions feature common large objects, including a wood bed and a silver metal wall lamp, though the color of bed is different. Spatial Relationships: Despite variations in surrounding details, the consistent mention of a white wood bed suggests a shared spatial context, possibly from different viewpoints within the same room. Minor differences, such as color variations in the bed, may be attributed to observational nuances rather than indicating distinct rooms, reinforcing the likelihood of the same room.
-Answer: True"""
-#######################
-
-NODE_FEAT_USER_EXAMPLE_1 = """We want to find a doorframe that is near a tv, a chair and a stool.
-Now we have seen the following object: doorframe_2 that is near chair and sofa. doorframe_3 that is near a tv and a chair. wooden door_2 that is near table, sink and lamp.
-Please select one object that is most likely to be the object I want to find. Please only select one object in the list and use this element name in answer. Use the exact name in the given sentences. Always follow the format: Answer: <your answer>."
-"""
-
-NODE_FEAT_AGENT_EXAMPLE_1 = """Reasoning: Among the given objects, "doorframe_3" is mentioned to be near a TV and a chair, most likely meeting the specified criteria of being near a TV, chair, and stool.
-Answer: doorframe_3"""
-
-NODE_FEAT_USER_EXAMPLE_2 = """We want to find a door that is near a dining table, window glass and a table cloth.
-Now we have seen the following object: door_2 that is near table and window glass. doorframe_4 that is near a table cloth and a glass. door_4 that is near photo, sofa and windows.
-Please select one object that is most likely to be the object I want to find. Please only select one object in the list and use this element name in answer. Use the exact name in the given sentences. Always follow the format: Answer: <your answer>."
-"""
-
-NODE_FEAT_AGENT_EXAMPLE_2 = """Reasoning: Among the given objects, 'door_2' is mentioned to be near a table and window glass. Although 'doorframe_4' is also near a tablecloth and a glass, it seems to meet the criteria. However, since the target goal is a door and not a doorframe, 'door_2' is more suitable.
-Answer: door_2"""
-
-NODE_FEAT_USER_EXAMPLE_3 = """We want to find a door that is near nothing.
-Now we have seen the following object: door_1 that is near toy and doorframe. doorframe_3 that is near nothing. door_5 that is near windor, cabinet, and bed.
-Please select one object that is most likely to be the object I want to find. Please only select one object in the list and use this element name in answer. Use the exact name in the given sentences. Always follow the format: Answer: <your answer>."
-"""
-
-NODE_FEAT_AGENT_EXAMPLE_3 = """Reasoning: Among the given objects, 'doorframe_3' is mentioned to be near nothing. The door we want to find is also near nothing, it seems to meet the criteria. However, since the target goal is a door and not a doorframe, 'doorframe_3' is more suitable.
-Answer: doorframe_3"""
-
-##########################
-
-CHECK_GOAL_USER_EXAMPLE_1 = """You are a robot exploring an environment for the first time. I will tell you the object I am looking for, and then you generate a list of synonyms that accurately represent the goal, so that as long as we see a object in the list, we find the goal. Please ensure the synonyms are specific and not overly broad. Directly provide the synonyms as a Python list without additional words. The goal is "toilet". Directly Provide synonyms as a python list without other words. Follow the format: Answer <your answer>.
-"""
-
-CHECK_GOAL_AGENT_EXAMPLE_1 = """
-Answer: ["toilet", "toilet seat", "toilet bowl"]
-"""
-
-CHECK_GOAL_USER_EXAMPLE_2 = """You are a robot exploring an environment for the first time. I will tell you the object I am looking for, and then you generate a list of synonyms that accurately represent the goal, so that as long as we see a object in the list, we find the goal. Please ensure the synonyms are specific and not overly broad. Directly provide the synonyms as a Python list without additional words. The goal is "tv". Directly Provide synonyms as a python list without other words. Follow the format: Answer <your answer>.
-"""
-
-CHECK_GOAL_AGENT_EXAMPLE_2 = """
-Answer: ["tv", "television", "television set"]
-"""
-
-CHECK_GOAL_USER_EXAMPLE_3 = """You are a robot exploring an environment for the first time. I will tell you the object I am looking for, and then you generate a list of synonyms that accurately represent the goal, so that as long as we see a object in the list, we find the goal. Please ensure the synonyms are specific and not overly broad. Directly provide the synonyms as a Python list without additional words. The goal is "chair". Note: Stool is not chair. Sofa is not chair. Directly Provide synonyms as a python list without other words. Follow the format: Answer <your answer>.
-"""
-
-CHECK_GOAL_AGENT_EXAMPLE_3 = """
-Answer: ["chair", "armchair"]
-"""
-
-class GPTInterfaceRefactor(LLMInterface):
+class ModelLLMDriver_GPT(BaseLLMDriver):
     def __init__(
-            self,
-            key_path="configs/openai_api_key.yaml",
-            config_path="configs/gpt_config.yaml",
+        self,
+        key_path="configs/openai_api_key.yaml",
+        config_path="configs/gpt_config.yaml",
     ):
         super().__init__()
         with open(key_path, 'r') as f:
@@ -263,333 +87,34 @@ class GPTInterfaceRefactor(LLMInterface):
 
         self.client = openai
         self.client.api_key = api_key
+        print("Set up LLM driver!")
 
-    def reset(self):
-        pass
-
-    def query(
-        self,
-        prompt: str,
-        validate_fn: Callable[[list[Any]], list[Any]],
-        required_samples: int = 1,
-        max_tries: int = 3,
-    ):
-        """
-        Queries a response from LLM for a given prompt. The required
-        number of response instances can be specified, and it will
-        make multiple query attempts in case of failures to respond.
-
-        Inputs: prompt, string
-                required_samples, int, no. of response instances needed
-                validate_fn, function that identifies valid answers in response
-                max_tries, int, maximum no. of attempts
-        """
-        answers = []
-        valid = False
-        remaining_samples_needed = required_samples
-        for _ in range(max_tries):
-            response = self.client.chat.completions.create(
-                model=self.config["model_type"],
-                messages=prompt,
-                n=remaining_samples_needed,
-                seed=self.config["seed"],
-                temperature=self.config["temperature"]
-            )
-
-            for choice in response.choices:
-                validated_resp = validate_fn(choice.message.content)
-                if validated_resp is not None:
-                    answers.append(validated_resp)
-
-            remaining_samples_needed = required_samples - len(answers)
-            valid = remaining_samples_needed <= 0
-            if valid:
-                break
-
-        return valid, answers
-        
-
-class GPTInterface(LLMInterface):
-    def __init__(
-        self,
-        key_path="configs/openai_api_key.yaml",
-        config_path="configs/gpt_config.yaml"
-        ):
-
-        super().__init__()
-
-        with open(key_path, 'r') as f:
-            key_dict = yaml.safe_load(f)
-            self.openai_api_key = key_dict['api_key']
-        with open(config_path, 'r') as f:
-            self.config = yaml.safe_load(f)
-
-        self.client = openai
-        self.client.api_key = self.openai_api_key
-        self.chat = [
-            {"role": "system", "content": self.config["setup_message"]},
-            {"role": "user", "content": USER_EXAMPLE_1},
-            {"role": "assistant", "content": AGENT_EXAMPLE_1},
-            {"role": "user", "content": USER_EXAMPLE_2},
-            {"role": "assistant", "content": AGENT_EXAMPLE_2},
-            {"role": "user", "content": USER_EXAMPLE_3},
-            {"role": "assistant", "content": AGENT_EXAMPLE_3},
-            {"role": "user", "content": USER_EXAMPLE_4},
-            {"role": "assistant", "content": AGENT_EXAMPLE_4}
-        ]
-
-        logs_folder = 'logs'
-
-        all_folders = [folder for folder in os.listdir(logs_folder) if os.path.isdir(os.path.join(logs_folder, folder))]
-
-        # Filter folders that start with "trial_"
-        trial_folders = [folder for folder in all_folders if folder.startswith("trial_")]
-
-        # Extract the numbers and find the maximum
-        numbers = [int(folder.split("_")[1]) for folder in trial_folders]
-        max_number = max(numbers, default=0)
-        trial_folder = os.path.join(logs_folder, 'trial_' + str(max_number))
-        log_path = os.path.join(trial_folder, 'llm_query.log')
-        
-        self.log_path = log_path
-
-    def reset(self, log_path=None):
-        if log_path is None:
-            logs_folder = 'logs'
-            all_folders = [folder for folder in os.listdir(logs_folder) if os.path.isdir(os.path.join(logs_folder, folder))]
-
-            # Filter folders that start with "trial_"
-            trial_folders = [folder for folder in all_folders if folder.startswith("trial_")]
-
-            # Extract the numbers and find the maximum
-            numbers = [int(folder.split("_")[1]) for folder in trial_folders]
-            max_number = max(numbers, default=0)
-            log_path = os.path.join(logs_folder, 'trial_' + str(max_number))
-            
-        log_path = os.path.join(log_path, 'llm_query.log')
-        self.log_path = log_path
-
-    def query(self, string):
-        self.chat = [
-            {"role": "system", "content": self.config["setup_message"]},
-            {"role": "user", "content": USER_EXAMPLE_1},
-            {"role": "assistant", "content": AGENT_EXAMPLE_1},
-            {"role": "user", "content": USER_EXAMPLE_2},
-            {"role": "assistant", "content": AGENT_EXAMPLE_2},
-            {"role": "user", "content": USER_EXAMPLE_3},
-            {"role": "assistant", "content": AGENT_EXAMPLE_3},
-            {"role": "user", "content": USER_EXAMPLE_4},
-            {"role": "assistant", "content": AGENT_EXAMPLE_4}
-        ]
-        self.chat.append(
-            {"role": "user", "content": string}
-        )
-        # print('PLAN MESSGAE', string)
-
+    def send_query(self, prompt, required_samples):
         response = self.client.chat.completions.create(
             model=self.config["model_type"],
-            messages=self.chat,
-            seed=self.config["seed"]
+            messages=prompt,
+            n=required_samples,
+            seed=self.config["seed"],
+            temperature=self.config["temperature"]
         )
-        with open(self.log_path, 'a') as file:
-            file.write(f'[PLAN QUERY MESSAGE]: {self.chat}\n')
-            log_reply =  response.choices[0].message.content.replace("\n", ";")
-            file.write(f'[PLAN REPLY MESSAGE]: {log_reply}\n')
+        return response
         
-        complete_response = response.choices[0].message.content.lower()
-        sample_response = complete_response[complete_response.find('answer:'):]
-        seperate_ans = re.split('\n|; |, | |answer:', sample_response)
-        seperate_ans = [i.replace('.','') for i in seperate_ans if i != ''] # to make sink. to sink
-        return seperate_ans
-    
-    def query_local_explore(self, string):
-        local_exp_query = [
-            {"role": "system", "content": self.config["setup_message"]},
-            {"role": "user", "content": LOCAL_EXP_USER_EXAMPLE_1},
-            {"role": "assistant", "content": LOCAL_EXP_AGENT_EXAMPLE_1},
-            {"role": "user", "content": LOCAL_EXP_USER_EXAMPLE_2},
-            {"role": "assistant", "content": LOCAL_EXP_AGENT_EXAMPLE_2},
-            {"role": "user", "content": string}
-        ]
-        # print('LOCAL MESSGAE', string)
-        response = self.client.chat.completions.create(
-            model=self.config["model_type"],
-            messages=local_exp_query,
-            seed=self.config["seed"]
-        )
-    
-        with open(self.log_path, 'a') as file:
-            file.write(f'[LOCAL QUERY MESSAGE]: {local_exp_query}\n')
-            log_reply =  response.choices[0].message.content.replace("\n", ";")
-            file.write(f'[LOCAL REPLY MESSAGE]: {log_reply}\n')
-        
-        complete_response = response.choices[0].message.content.lower()
-        sample_response = complete_response[complete_response.find('answer:'):]
-        seperate_ans = re.split('\n|; |, | |answer:', sample_response)
-        seperate_ans = [i.replace('.','') for i in seperate_ans if i != '']
 
-        return seperate_ans
-
-    def query_object_class(self, string):
-        chat_query_obj = [
-            {"role": "system", "content": self.config["setup_message"]},
-            {"role": "user", "content": CLS_USER_EXAMPLE_1},
-            {"role": "assistant", "content": CLS_AGENT_EXAMPLE_1},
-            {"role": "user", "content": CLS_USER_EXAMPLE_2},
-            {"role": "assistant", "content": CLS_AGENT_EXAMPLE_2},
-            {"role": "user", "content": string}
-        ]
-        # print('CLASSIFY MESSGAE', string)
-        response = self.client.chat.completions.create(
-            model=self.config["model_type"],
-            messages=chat_query_obj,
-            seed=self.config["seed"]
-        )
-        with open(self.log_path, 'a') as file:
-            file.write(f'[CLASSIFY QUERY MESSAGE]: {chat_query_obj}\n')
-            log_reply =  response.choices[0].message.content.replace("\n", ";")
-            file.write(f'[CLASSIFY REPLY MESSAGE]: {log_reply}\n')
-        
-        complete_response = response.choices[0].message.content.lower()
-        complete_response = complete_response.replace(" ", "")
-        seperate_ans = re.split('\n|,|:|-', complete_response)
-        seperate_ans = [i.replace('.','') for i in seperate_ans if i != ''] 
-        
-        return seperate_ans
-
-    def query_state_estimation(self, string):
-        chat_query = [
-            {"role": "system", "content": "You are a robot exploring an environment for the first time. You will be given an object to look for and should provide guidance on where to explore based on a series of observations. Observations will be given as descriptions of objects seen from four cameras in four directions. Your job is to estimate the robot's state. You will be given two descriptions, and you need to decide whether these two descriptions describe the same room. For example, if we have visited the room before and got one description, when we visit a similar room and get another description, it is your job to determine whether the two descriptions represent the same room. You should understand that descriptions may contain errors and noise due to sensor noise and partial observability. Always provide reasoning along with a deterministic answer. If there are no suitable answers, leave the space after 'Answer: None.' Always include: Reasoning: <your reasoning> Answer: <your answer>."},
-            {"role": "user", "content": STATE_EST_USER_EXAMPLE_1},
-            {"role": "assistant", "content": STATE_EST_USER_EXAMPLE_1},
-            {"role": "user", "content": STATE_EST_USER_EXAMPLE_2},
-            {"role": "assistant", "content": STATE_EST_AGENT_EXAMPLE_2},
-            {"role": "user", "content": STATE_EST_USER_EXAMPLE_3},
-            {"role": "assistant", "content": STATE_EST_AGENT_EXAMPLE_3},
-            {"role": "user", "content": string}
-        ]
-        # print('CLASSIFY MESSGAE', string)
-        response = self.client.chat.completions.create(
-            model=self.config["model_type"],
-            messages=chat_query,
-            seed=self.config["seed"]
-        )
-        with open(self.log_path, 'a') as file:
-            file.write(f'[STATE EST QUERY MESSAGE]: {chat_query}\n')
-            log_reply =  response.choices[0].message.content.replace("\n", ";")
-            file.write(f'[STATE EST REPLY MESSAGE]: {log_reply}\n')
-       
-        complete_response = response.choices[0].message.content.lower()
-        sample_response = complete_response[complete_response.find('answer:'):]
-        seperate_ans = re.split('\n|; |, | |answer:', sample_response)
-        seperate_ans = [i.replace('.','') for i in seperate_ans if i != '']
-        # print(complete_response)
-        if len(seperate_ans) > 0:
-            cleaned_ans = seperate_ans[0]
-        else:
-            cleaned_ans = 'none'
-        return cleaned_ans
-
-    def query_node_feature(self, string):
-            chat_query = [
-                {"role": "system", "content": self.config["setup_message"]},
-                {"role": "user", "content": NODE_FEAT_USER_EXAMPLE_1},
-                {"role": "assistant", "content": NODE_FEAT_AGENT_EXAMPLE_1},
-                {"role": "user", "content": NODE_FEAT_USER_EXAMPLE_2},
-                {"role": "assistant", "content": NODE_FEAT_AGENT_EXAMPLE_2},
-                {"role": "user", "content": NODE_FEAT_USER_EXAMPLE_3},
-                {"role": "assistant", "content": NODE_FEAT_AGENT_EXAMPLE_3},
-                {"role": "user", "content": string}
-            ]
-            # print('CLASSIFY MESSGAE', string)
-            response = self.client.chat.completions.create(
-                model=self.config["model_type"],
-                messages=chat_query,
-                seed=self.config["seed"]
-            )
-            with open(self.log_path, 'a') as file:
-                file.write(f'[NODE FEAT QUERY MESSAGE]: {chat_query}\n')
-                log_reply =  response.choices[0].message.content.replace("\n", ";")
-                file.write(f'[NODE FEAT REPLY MESSAGE]: {log_reply}\n')
-        
-            complete_response = response.choices[0].message.content.lower()
-            sample_response = complete_response[complete_response.find('answer:'):]
-            seperate_ans = re.split('\n|; |, | |answer:', sample_response)
-            seperate_ans = [i.replace('.','') for i in seperate_ans if i != '']
-            return seperate_ans
-
-    def check_goal(self, goal):
-        chat_query = [
-            {"role": "system", "content": "You are a robot exploring an environment for the first time."},
-            {"role": "user", "content": CHECK_GOAL_USER_EXAMPLE_1},
-            {"role": "assistant", "content": CHECK_GOAL_AGENT_EXAMPLE_1},
-            {"role": "user", "content": CHECK_GOAL_USER_EXAMPLE_2},
-            {"role": "assistant", "content": CHECK_GOAL_AGENT_EXAMPLE_2},
-            {"role": "user", "content": CHECK_GOAL_USER_EXAMPLE_3},
-            {"role": "assistant", "content": CHECK_GOAL_AGENT_EXAMPLE_3},
-            {"role": "user", "content": f"You are a robot exploring an environment for the first time. I will tell you the object I am looking for, and then you generate a list of synonyms that accurately represent the goal, so that as long as we see a object in the list, we find the goal. Please ensure the synonyms are specific and not overly broad. Directly provide the synonyms as a Python list without additional words. The goal is {goal}. Directly Provide synonyms as a python list without other words. Follow the format: Answer <your answer>."}
-        ]
-        # print('CLASSIFY MESSGAE', string)
-        response = self.client.chat.completions.create(
-            model=self.config["model_type"],
-            messages=chat_query,
-            seed=self.config["seed"]
-        )
-        with open(self.log_path, 'a') as file:
-            file.write(f'[CHECK GOAL QUERY MESSAGE]: {chat_query}\n')
-            log_reply =  response.choices[0].message.content.replace("\n", ";")
-            file.write(f'[CHECK GOAL REPLY MESSAGE]: {log_reply}\n')
-    
-        complete_response = response.choices[0].message.content.lower()
-        sample_response = complete_response[complete_response.find('answer:'):]
-        seperate_ans = re.split('\n|answer:', sample_response)
-        seperate_ans = [i for i in seperate_ans if i !='']
-        return seperate_ans[0] # eg '["sofa", "couch"]'
-
-class VLM_BLIP(VQAPerception):
-    def __init__(self):
-
-        super().__init__()
-
-        self.model, self.image_preprocessors, self.text_preprocessors = load_model_and_preprocess(
-            name="blip_vqa", model_type="vqav2", is_eval=True, device=self.device
-        )
-
-    def query(self, image, question_prompt):
-        image = image.convert("RGB")
-        samples = {
-            "image": self.image_preprocessors["eval"](image).unsqueeze(0).to(self.device),
-            "text_input": self.text_preprocessors["eval"](question_prompt)
-        }
-
-        ans = self.model.predict_answers(samples=samples, inference_method="generate")
-        return ans[0]
-    
-class VLM_BLIPRefactor(VQAPerception):
+class ModelVQADriver_BLIP(BaseVQADriver):
     def __init__(self, max_batch_size: int = 16):
-
         super().__init__()
-
         self.model, self.image_preprocessors, self.text_preprocessors = load_model_and_preprocess(
             name="blip_vqa", model_type="vqav2", is_eval=True, device=self.device
         )
         self.max_batch_size = max_batch_size
+        print("Set up VQA model!")
 
-    def query(
-            self, 
-            image_input: Union[Image.Image, list],
-            prompt_input: Union[str, list],
-            validate_fn: Callable[[str], Optional[str]],
-            prompts_per_image: int = 1,
+    def send_query(
+        self,
+        image_input: Union[Image.Image, list],
+        prompt_input: Union[str, list],
+        prompts_per_image: int,
     ):
-        assert prompts_per_image >= 1, "Invalid number of prompts per image"
-        assert isinstance(image_input, list) == isinstance(prompt_input, list), \
-            "Image and prompt input types do not match"
-        if not isinstance(image_input, list):
-            image_input, prompt_input = [image_input], [prompt_input]
-        assert len(image_input) * prompts_per_image == len(prompt_input), \
-            "No. of input images does not match no. of prompts"
-
         preprocessed_ims = torch.stack([
             self.image_preprocessors["eval"](im.convert("RGB")) for im in image_input
         ]).to(self.device)
@@ -610,71 +135,22 @@ class VLM_BLIPRefactor(VQAPerception):
             }
             answers += self.model.predict_answers(
                 samples=samples, inference_method="generate")
-        
-        return validate_fn(answers)
+            
+        return answers
 
-    
-class VLM_LLAVA(VQAPerception):
-    def __init__(self):
-        super().__init__()
-        # LLAVA
-        self.model_path = 'liuhaotian/llava-v1.5-7b' # unsure how to change the model path
-        self.model_name = 'llava-v1.5-7b'
-        self.conv_mode = "llava_v1"
-        self.load_4bit = True
-        self.load_8bit = False
-        self.model_base = None
-        self.tokenizer, self.model,  self.image_processor,  self.context_len = load_pretrained_model(self.model_path, self.model_base, self.model_name, self.load_8bit, self.load_4bit, device='cuda') # set decive = self.device cause issues
-        self.conv = conv_templates[self.conv_mode].copy()
-        self.roles = self.conv.roles
-
-    def query(self, image, question_prompt):
-        from transformers import TextStreamer
-        self.reset()
-        image = image.convert("RGB")
-        image_tensor = process_images([image], self.image_processor, self.model.config)
-        image_tensor = image_tensor.to(self.model.device, dtype=torch.float16)
-        if self.model.config.mm_use_im_start_end:
-            inp = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN + '\n' + question_prompt
-        else:
-            inp = DEFAULT_IMAGE_TOKEN + '\n' + question_prompt
-        self.conv.append_message(self.conv.roles[0], inp)
-        self.conv.append_message(self.conv.roles[1], None)
-        prompt = self.conv.get_prompt()
-
-        input_ids = tokenizer_image_token(prompt, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).to(self.model.device)
-        stop_str = self.conv.sep if self.conv.sep_style != SeparatorStyle.TWO else self.conv.sep2
-        keywords = [stop_str]
-        stopping_criteria = KeywordsStoppingCriteria(keywords, self.tokenizer, input_ids)
-        with torch.inference_mode():
-            output_ids = self.model.generate(
-                input_ids,
-                images=image_tensor,
-                do_sample=True,
-                temperature= 0.2,
-                max_new_tokens= 512,
-                use_cache=True,
-                stopping_criteria=[stopping_criteria])
-        outputs = self.tokenizer.decode(output_ids[0, input_ids.shape[1]:]).strip('</s>')
-        self.conv.messages[-1][-1] = outputs
-        return outputs
-
-    def reset(self):
-        self.conv = conv_templates[self.conv_mode].copy()
-
-class VLM_GroundingDino(ObjectPerception):
+class ModelObjectDriver_GroundingDINO(BaseObjectDriver):
     def __init__(
         self,
-        groundingdino_config_path="Grounded-Segment-Anything/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py",
+        gdino_config_path="Grounded-Segment-Anything/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py",
         ram_ckpt_path="checkpoints/ram_swin_large_14m.pth",
-        groundingdino_ckpt_path="checkpoints/groundingdino_swint_ogc.pth",
+        gdino_ckpt_path="checkpoints/groundingdino_swint_ogc.pth",
     ):
 
         super().__init__()
 
-        args = SLConfig.fromfile(groundingdino_config_path)
+        args = SLConfig.fromfile(gdino_config_path)
         args.device = self.device
-        gdino_ckpt = torch.load(groundingdino_ckpt_path, map_location="cuda")
+        gdino_ckpt = torch.load(gdino_ckpt_path, map_location="cuda")
         self.box_threshold = 0.25
         self.text_threshold = 0.2
         self.iou_threshold = 0.5
@@ -708,27 +184,49 @@ class VLM_GroundingDino(ObjectPerception):
         self.small_object_filter_pix = 80
         self.glass_objects_iou_pix = 0.7
 
-    def _preprocess_image(self, image, model):
-        """
-        Image preprocessor.
+        print("Set up GDino model!")
 
-        Input:
-            image: PIL image
+    def send_query(
+        self,
+        image: Image.Image,
+        additional_tags: str,
+    ):
+        tags = self._caption_objects_in_image(image, additional_tags)
+        detections = self._detect_objects_in_tags(image, tags)
+        boxes_filt, scores, pred_phrases, selected_labels = detections
         
-        Return:
-            image_rgb: PIL Image (RGB), the original image in RGB format
-            processed: PIL Image (RGB)
-        """
-        image_rgb = image.convert("RGB")
-        if model == "gdino":
-            processed, _ = self.preprocessor_gdino(image_rgb, None)  # 3, h, w
-        elif model == "ram":
-            processed = self.preprocessor_ram(image_rgb)  # 3, h, w
-        else:
-            raise NotImplementedError
-        return processed
-    
-    def _run_gdino(self, image, caption):
+        # Scale normalized bounding boxes to original image size
+        w, h = image.size
+        boxes_filt = boxes_filt.cpu()
+        for i in range(len(boxes_filt)):
+            boxes_filt[i] = boxes_filt[i] * torch.Tensor([w, h, w, h])
+            boxes_filt[i][:2] -= boxes_filt[i][2:] / 2
+            boxes_filt[i][2:] += boxes_filt[i][:2]
+
+        # use NMS to handle overlapped boxes
+        nms_idx = torchvision.ops.nms(boxes_filt, scores, self.iou_threshold).numpy().tolist()
+        boxes_filt = boxes_filt[nms_idx]
+        pred_phrases = [pred_phrases[idx] for idx in nms_idx]
+        selected_labels = [selected_labels[idx] for idx in nms_idx]
+        cropped_ims = []
+        for i in range(len(boxes_filt)):
+            cropped_img = image.crop(np.array(boxes_filt[i]))
+            cropped_ims.append(cropped_img)
+
+        return boxes_filt, selected_labels, cropped_ims
+        
+
+    def _caption_objects_in_image(self, image, additional_tags):
+        ram_image = self._preprocess_image(image, "ram").unsqueeze(0).to(self.device)
+        tags, _ = inference_ram.inference(ram_image, self.ram_model)
+        tags = tags.replace(' |', ',')
+        tags += additional_tags
+        return tags
+
+    def _detect_objects_in_tags(self, image, caption):
+        # Preprocess image
+        image = self._preprocess_image(image, "gdino").to(self.device)
+
         # Format tags
         caption = caption.lower()
         caption = caption.strip()
@@ -764,40 +262,16 @@ class VLM_GroundingDino(ObjectPerception):
             scores.append(logit.max().item())
 
         return boxes_filt, torch.Tensor(scores), pred_phrases, selected_labels
-    
-    def _detect_objects(self, image, additional_tags=""):
-        gdino_image = self._preprocess_image(image, "gdino").to(self.device)
-        ram_image = self._preprocess_image(image, "ram").unsqueeze(0).to(self.device)
 
-        # RAM
-        tags, _ = inference_ram.inference(ram_image, self.ram_model)
-        tags = tags.replace(' |', ',')
-        tags += additional_tags
-
-        # GroundingDINO
-        boxes_filt, scores, pred_phrases, selected_labels = self._run_gdino(
-            gdino_image, tags
-        )
-        
-        # Scale normalized bounding boxes to original image size
-        w, h = image.size
-        boxes_filt = boxes_filt.cpu()
-        for i in range(len(boxes_filt)):
-            boxes_filt[i] = boxes_filt[i] * torch.Tensor([w, h, w, h])
-            boxes_filt[i][:2] -= boxes_filt[i][2:] / 2
-            boxes_filt[i][2:] += boxes_filt[i][:2]
-
-        # use NMS to handle overlapped boxes
-        nms_idx = torchvision.ops.nms(boxes_filt, scores, self.iou_threshold).numpy().tolist()
-        boxes_filt = boxes_filt[nms_idx]
-        pred_phrases = [pred_phrases[idx] for idx in nms_idx]
-        selected_labels = [selected_labels[idx] for idx in nms_idx]
-        cropped_ims = []
-        for i in range(len(boxes_filt)):
-            cropped_img = image.crop(np.array(boxes_filt[i]))
-            cropped_ims.append(cropped_img)
-
-        return boxes_filt, selected_labels, cropped_ims
+    def _preprocess_image(self, image, model):
+        image_rgb = image.convert("RGB")
+        if model == "gdino":
+            processed, _ = self.preprocessor_gdino(image_rgb, None)  # 3, h, w
+        elif model == "ram":
+            processed = self.preprocessor_ram(image_rgb)  # 3, h, w
+        else:
+            raise ValueError(f"Invalid model {model} with no image preprocessor!")
+        return processed
 
     def _filter(self, object_detections):
         od = list(zip(*object_detections))
@@ -827,5 +301,113 @@ class VLM_GroundingDino(ObjectPerception):
             obj for obj, low_overlap in zip(filter_small, iou_thresholded) 
             if low_overlap
         ]
-
         return list(zip(*filter_glass))
+
+######## Model interface classes ########
+
+class LLMInterface:
+    def __init__(
+        self,
+        driver,
+    ):
+        self.driver = driver
+
+    def reset(self):
+        """
+        Resets state of the planner, including clearing LLM context
+        """
+        raise NotImplementedError("Subclasses to implement this method")
+    
+    # TODO: Implement a batched version of query
+    def query(
+        self,
+        prompt: str,
+        validate_fn: Callable[[list[Any]], list[Any]],
+        required_samples: int = 1,
+        max_tries: int = 3,
+    ):
+        answers = []
+        valid = False
+        remaining_samples_needed = required_samples
+        for _ in range(max_tries):
+            response = self.driver.send_query(prompt, remaining_samples_needed)
+
+            for choice in response.choices:
+                validated_resp = validate_fn(choice.message.content)
+                if validated_resp is not None:
+                    answers.append(validated_resp)
+
+            remaining_samples_needed = required_samples - len(answers)
+            valid = remaining_samples_needed <= 0
+            if valid:
+                break
+
+        return valid, answers
+
+
+class VQAPerception:
+    def __init__(self, driver: type[BaseVQADriver]):
+        self.driver = driver
+
+    def query(
+            self, 
+            image_input: Union[Image.Image, list],
+            prompt_input: Union[str, list],
+            validate_fn: Callable[[str], Optional[str]],
+            prompts_per_image: int = 1,
+    ):
+        """
+        Input:
+            image: PIL image type
+            question_prompt: String, eg: "Where is the photo taken?"
+        
+        Return:
+            string
+        """
+        assert prompts_per_image >= 1, "Invalid number of prompts per image"
+        assert isinstance(image_input, list) == isinstance(prompt_input, list), \
+            "Image and prompt input types do not match"
+        if not isinstance(image_input, list):
+            image_input, prompt_input = [image_input], [prompt_input]
+        assert len(image_input) * prompts_per_image == len(prompt_input), \
+            "No. of input images does not match no. of prompts"
+
+        resp = self.driver.send_query(
+            image_input, prompt_input, prompts_per_image
+        )
+        return validate_fn(resp)
+    
+
+class ObjectPerception:
+    def __init__(self, driver: type[BaseObjectDriver]):
+        self.driver = driver
+
+    def detect_all_objects(self, image, filter=False):
+        """
+        Input:
+            image: PIL image type
+        Return:
+            list of bounding boxes
+        """
+        object_detections = self._detect_objects(image, "")
+        if filter:
+            return self._filter(object_detections)
+        return object_detections
+    
+    def detect_specific_objects(self, image, object_list, filter=False):
+        """
+        Input:
+            image: PIL image type
+            object_list: List of String describing objects to find, eg: ["door, "exit", ...]
+        Return:
+            list of bounding boxes
+        """
+        assert len(object_list) > 0, "If not detecting specific objects, use detect_all_objects"
+        additional_tags = reduce(lambda a, b: a + ", " + b, object_list)
+        object_detections = self._detect_objects(image, additional_tags)
+        if filter:
+            return self._filter(object_detections)
+        return object_detections
+    
+    def _detect_objects(self, image, additional_tags):
+        return self.driver.send_query(image, additional_tags)
