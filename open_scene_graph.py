@@ -259,7 +259,6 @@ class OSGSpec(OSGMetaStructure):
         """
         Verifies that dst class can be near the src class
         """
-        print('Prox query:', src_node_cls, dst_node_cls)
         cls_spec = self._class_view[src_node_cls]
         return "is near" in cls_spec and dst_node_cls in cls_spec["is near"]
 
@@ -267,7 +266,6 @@ class OSGSpec(OSGMetaStructure):
         """
         Verifies that dst class can be contained by the src class.
         """
-        print('Cont query:', src_node_cls, dst_node_cls)
         cls_spec = self._class_view[src_node_cls]
         return "contains" in cls_spec and dst_node_cls in cls_spec["contains"]
         
@@ -307,7 +305,6 @@ class OpenSceneGraph:
 
     ### Adding or updating nodes
     def getDefaultNodeAttrs(self, node_cls: str):
-        print("***", node_cls)
         return self.spec.getNodeTemplate(node_cls)
     
     def makeNewNodeAttrs(
@@ -396,9 +393,10 @@ class OpenSceneGraph:
         ]
         
     def getLayer(self, layer: int):
+        layer_classes = self.spec.getLayerClasses(layer)
         return [
-            node for node, attrs in self.G.nodes(data=True)
-            if attrs["layer"] == layer
+            node for node in self.G.nodes()
+            if node.node_cls in layer_classes
         ]
     
     def getDestNodes(
@@ -412,7 +410,7 @@ class OpenSceneGraph:
         """
         return [
             dst for _, dst, attrs in self.G.out_edges(src_node_key, data=True)
-            if attrs["label"] == edge_type
+            if attrs["edge_type"] == edge_type
         ]
 
     def getChildNodes(self, node_key: type[NodeKey]):

@@ -273,7 +273,7 @@ class Mapper:
                 cat_idx = self.semantic_categories.index(cat)
                 cat_map = self.map_state.local_map[0, MC.NON_SEM_CHANNELS + cat_idx].cpu().numpy()
                 cat_mask = ~(cat_map > 0)
-                obstacle_map *= cat_mask.astype(np.float)
+                obstacle_map *= cat_mask.astype(float)
             return obstacle_map
         else:
             return self.map_state.get_obstacle_map(0)

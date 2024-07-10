@@ -254,13 +254,11 @@ class Prompts: # "Prompts" namespace in which to implement prompts
             Input: ctx, dict containing descriptions of observed and candidate places
             """
             place_classes = self.spec.getLayerClasses(3)
-            context = self.template['ctx']
-            fewshot = self.template['fewshot']
-            query = self.template['query']
 
             # TODO: Currently does not handle specs with more than one place class
-            context.format(place_class=place_classes[0])
-            query.format(
+            context = self.template['ctx'].format(place_class=place_classes[0])
+            fewshot = self.template['fewshot']
+            query = self.template['query'].format(
                 observed_place_description=ctx['obs'],
                 candidate_place_description=ctx['candidate'],
                 place_class=place_classes[0]
@@ -280,6 +278,7 @@ class Prompts: # "Prompts" namespace in which to implement prompts
             Output: option, where None indicates an invalid response,
                     otherwise a boolean indicating matching validity
             """
+            print("&&&", resp)
             answer = resp.split("Answer:")[-1].lower()
             if 'true' in answer:
                 return True
@@ -296,8 +295,6 @@ class Prompts: # "Prompts" namespace in which to implement prompts
                 "obs": (obj_str, nearby_objs_strs),
                 "nodes": {"node_str": (node_key, nearby_nodes_strs)}
             """
-            fewshot = self.template['fewshot']
-            query = self.template['query']
             obs, obs_feats = ctx['obs']
             nodes = ctx['nodes']
 
@@ -312,10 +309,11 @@ class Prompts: # "Prompts" namespace in which to implement prompts
             
             target_node_with_feats = feats_to_str_fn(obs, obs_feats)
             nodes = [feats_to_str_fn(n, nodes[n][1]) for n in nodes]
-            query.format(
+            query = self.template['query'].format(
                 target_node_with_feats=target_node_with_feats,
                 existing_nodes_with_feats=reduce(lambda a, b: a + ' ' + b, nodes)
             )
+            fewshot = self.template['fewshot']
             
             chat = [
                 {"role": "system", "content": "You are a helpful assistant."}

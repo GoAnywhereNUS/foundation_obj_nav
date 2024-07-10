@@ -20,7 +20,6 @@ def draw_annotated_obs(views, obs):
     }
     """
     for view, view_data in views.items():
-        print("##", view)
         image = Image.fromarray(obs[view]['image'])
         draw = ImageDraw.Draw(image)
 

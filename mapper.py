@@ -141,7 +141,7 @@ class OSGMapper:
             classify_prompt,
             classify_handle_resp_fn,
             required_samples=1,
-            max_tries=5,
+            max_tries=10,
         )
         if valid:
             class_to_object_map, = classify_resp
@@ -173,7 +173,9 @@ class OSGMapper:
             Prompts.AppearanceDescription, 
             (class_to_object_map, combined_obdet_labels)
         )
-        parsed_attrs = self.vqa.query(
+        
+        print("()()()", len(parsed_ims), len(parsed_labels), len(parsed_bboxes))
+        parsed_attrs = [] if len(parsed_ims) == 0 else self.vqa.query(
             parsed_ims, desc_prompts, desc_handle_resp_fn, prompts_per_image=2)
 
         # Return parsed observations sorted by class, for each view
@@ -203,7 +205,7 @@ class OSGMapper:
                 views[view]["objects"][cls] = cls_objs
 
         t5 = time.time()
-        print(t2 - t1, t3 - t2, t4 - t3, t5 - t4)
+        print("Timing:", t2 - t1, t3 - t2, t4 - t3, t5 - t4)
 
         if self.logging["obs"]:
             draw_annotated_obs(views, obs)
@@ -262,9 +264,11 @@ class OSGMapper:
                     match_handle_resp_fn,
                     required_samples=5,
                 )
-                consensus_match = Counter([
-                    b for b in match_resp]).most_common(1)[0][0]
-                if valid and consensus_match:
+                print(valid, match_resp)
+                if (
+                    valid and
+                    Counter(match_resp).most_common(1)[0][0] # consensus is a match
+                ):
                     return place_node
             
         return (consensus_place_class, consensus_place_label)
@@ -280,13 +284,18 @@ class OSGMapper:
         """
         print(est_state)
         print("OSG updating")
+        print("*********", path)
+
+        object_nodes = dict()
         if isinstance(est_state, tuple):
             # Currently in an unrecognisable location. Check against the
             # OSG specification to see if this location can be connected back
             # to the current OSG.
             place_class, place_label = est_state
+            print("^^^", path, place_class, place_label)
             if len(path) > 0:
                 last_path_node = path[-1]
+                print(self.spec.isConnectable(place_class, last_path_node.node_cls))
                 if not self.spec.isConnectable(place_class, last_path_node.node_cls):
                     raise Exception(
                         f"""Invalid spatial structure encountered! {place_class}
@@ -297,19 +306,19 @@ class OSGMapper:
             # node and update the spatial connectivity
             est_state = self._addPlaceNode(place_class, (place_label,))
             if len(path) > 0:
-                self.OSG.addEdges(est_state, last_path_node)
+                self.OSG.addEdges(est_state, last_path_node, "connects to")
 
             # Currently in new Place node. Add all observed Objects/Connectors
             # directly as child nodes, and update their connectivity/containment
             # relations wrt current Place node.
-            for _, data in views.items():
+            for view, data in views.items():
                 nodes, neighbours = [], []
 
                 # For this view, add new leaf nodes and connect them to Place
                 for cls, objects in data["objects"].items():
                     added_nodes = [self._addLeafNode(cls, o) for o in objects]
                     nodes += added_nodes
-                    neighbours += [nidxs for _, _, _ ,_ , _, nidxs in objects]
+                    neighbours += [nidxs for _, _, _, _ , _, nidxs in objects]
 
                     if cls in self.spec.getLayerClasses(2): # Connectors
                         self.OSG.addEdges(est_state, added_nodes, "connects to")
@@ -320,6 +329,11 @@ class OSGMapper:
                 for node, neighbours in zip(nodes, neighbours):
                     neighbour_nodes = [nodes[idx] for idx in neighbours]
                     self.OSG.addEdges(node, neighbour_nodes, "is near")
+
+                object_nodes[view] = list(zip(
+                    nodes,
+                    [obj[3] for objs in data["objects"].values() for obj in objs]
+                ))
             
             # Update region abstractions
             for _ in range(4, self.spec.getHighestLayerId() + 1):
@@ -332,7 +346,7 @@ class OSGMapper:
             nodes_neighbours_map = dict()
             for view, assocs in associations.items():
                 flattened_objs = [
-                    (cls, obj) for cls, objs in views[view]["objects"]
+                    (cls, obj) for cls, objs in views[view]["objects"].items()
                     for obj in objs
                 ]
 
@@ -359,18 +373,23 @@ class OSGMapper:
                 # added/updated node. (The same node may be updated from
                 # multiple views, so we record neighbours across all of them).
                 for obs_id, node in enumerate(nodes):
-                    nidxs = flattened_objs[obs_id]
+                    _, (_, _, _, _, _, nidxs) = flattened_objs[obs_id]
                     neighbour_nodes = [nodes[idx] for idx in nidxs]
                     if node in nodes_neighbours_map:
                         nodes_neighbours_map[node] += neighbour_nodes
                     else:
-                        nodes_neighbours_map = neighbour_nodes
+                        nodes_neighbours_map[node] = neighbour_nodes
+
+                object_nodes[view] = list(zip(
+                    nodes,
+                    [obj[3] for _, obj in flattened_objs]
+                ))
 
             # Update spatial proximity edges among the nodes
-            for node, neighbours in nodes_neighbours_map:
+            for node, neighbours in nodes_neighbours_map.items():
                 self.OSG.addEdges(node, neighbours, "is near")
             
-        return est_state
+        return est_state, object_nodes
     
     def visualiseOSG(self, est_state):
         self.OSG.visualise(show_layer_1_for_node=est_state)
@@ -391,8 +410,6 @@ class OSGMapper:
                 ~torch.eye(len(bboxes), dtype=bool),
                 torch.logical_or(ious_thresholded, dists_thresholded)
             )
-            print(dists)
-            print(ious)
             neighbour_idxs = [
                 [idx for idx, flag in enumerate(flags) if flag]
                 for flags in neighbours.tolist()
@@ -485,7 +502,10 @@ class OSGMapper:
     ) -> str:
         place_desc = ""
         for heading, feats in object_feats_per_view.items():
-            curr_heading_feats = reduce(lambda s1, s2: s1 + ", " + s2, feats)
+            curr_heading_feats = (
+                "nothing" if len(feats) == 0 
+                else reduce(lambda s1, s2: s1 + ", " + s2, feats)
+            )
             prep = 'is' if len(curr_heading_feats) <= 1 else 'are'
             if len(object_feats_per_view) == 1:
                 heading_desc = f"Around you, there {prep} {curr_heading_feats}."
