@@ -126,7 +126,6 @@ class Prompts: # "Prompts" namespace in which to implement prompts
             """
             class_to_object_map, _ = ctx
             object_count = sum(map(len, class_to_object_map.values()))
-            print(ctx, resp)
             assert len(resp) == object_count * 2, "resp and ctx have unmatched lengths"
             return [
                 resp[i*2] + ' ' + resp[i*2+1] for i in range(object_count)
@@ -278,7 +277,6 @@ class Prompts: # "Prompts" namespace in which to implement prompts
             Output: option, where None indicates an invalid response,
                     otherwise a boolean indicating matching validity
             """
-            print("&&&", resp)
             answer = resp.split("Answer:")[-1].lower()
             if 'true' in answer:
                 return True

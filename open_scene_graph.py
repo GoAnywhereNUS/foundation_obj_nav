@@ -513,7 +513,6 @@ class OpenSceneGraph:
 
         # Create subgraph for layers 2 and 3
         spatial_subgraph = self._getSpatialSubgraph()
-        print(spatial_subgraph)
 
         # Extract nodes for each layer
         layer_nodes = {
