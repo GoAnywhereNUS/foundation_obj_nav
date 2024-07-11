@@ -1,57 +1,21 @@
 import os
-import sys
 import numpy as np
-import re
-from PIL import Image
 import logging
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import torch
 
 from mapper import OSGMapper
-
-from scene_graph import SceneGraph, default_scene_graph_specs
-from model_interfaces_old import GPTInterface, VLM_BLIP, VLM_GroundingDino
 from utils.vis_utils import Visualiser
-import json, random
+import json
 
 class Navigator:
     def __init__(
         self,
-        scene_graph_specs=default_scene_graph_specs,
+        scene_graph_specs=None,
         llm_config_path="configs/gpt_config.yaml",
         visualise=False,
     ):
-        # Set up foundation models for perception and reasoning
-        self.llm = GPTInterface(config_path=llm_config_path)
-        self.perception = {
-            "object": VLM_GroundingDino(),
-            "vqa": VLM_BLIP()
-        }
-
-        # Set up scene graph and state 
-        if scene_graph_specs is None:
-            # TODO: Query LLM to get the specs
-            raise NotImplementedError
-        self.scene_graph_specs = scene_graph_specs
-        self.scene_graph = SceneGraph(scene_graph_specs)
-        scene_graph_specs_dict = json.loads(scene_graph_specs)
-
-        self.region_layer_order = []
-        for layer in scene_graph_specs_dict.keys():
-            if layer == 'object' or layer == 'state':
-                continue
-            if "contains" in scene_graph_specs_dict[layer].keys():
-                self.region_layer_order.append(layer)
-                for sublayer in scene_graph_specs_dict[layer]['contains']:
-                    if sublayer not in self.region_layer_order and sublayer != 'object':
-                        self.region_layer_order.append(sublayer)
-
-
-        self.state_spec = scene_graph_specs_dict["state"]
-        self.current_state = {node_type: None for node_type in self.state_spec}
-
         # Set up parameters to be used in reasoning
         self.llm_max_query = 10
         self.llm_sampling_query = 5
@@ -75,7 +39,6 @@ class Navigator:
         self.action_logging = open(
             self.action_log_path, 'a'
         )
-        self.llm.reset(self.trial_folder)
 
         # Note: Env and controller to be implemented in subclass
 
@@ -92,9 +55,6 @@ class Navigator:
         self.tmp_path = []
 
     def reset(self):
-        # Reset scene graph
-        self.scene_graph = SceneGraph(self.scene_graph_specs)
-
         # Reset data structures
         self.explored_node = []
         self.path = []
@@ -115,8 +75,6 @@ class Navigator:
         self.action_logging = open(
             self.action_log_path, 'a'
         )
-        # Reset LLM
-        self.llm.reset(self.trial_folder)
 
     def create_log_folder(log_folder = 'logs'):
         logs_folder = 'logs'
@@ -153,17 +111,17 @@ class Navigator:
         return trial_folder
     
     def check_goal(self, label):
-        if self.goal_synonyms == None:
-            for i in range(self.llm_max_query):
-                if self.goal_synonyms == None:
-                    goal_candidate = self.llm.check_goal(self.goal)
-                    try:
-                        goal_candidate_lst = json.loads(goal_candidate)
-                        if isinstance(goal_candidate_lst, list) and self.goal in goal_candidate_lst:
-                            self.goal_synonyms = [i.lower() for i in goal_candidate_lst]
-                            break
-                    except:
-                        print('ERROR: No valid goal')
+        # if self.goal_synonyms == None:
+        #     for i in range(self.llm_max_query):
+        #         if self.goal_synonyms == None:
+        #             goal_candidate = self.llm.check_goal(self.goal)
+        #             try:
+        #                 goal_candidate_lst = json.loads(goal_candidate)
+        #                 if isinstance(goal_candidate_lst, list) and self.goal in goal_candidate_lst:
+        #                     self.goal_synonyms = [i.lower() for i in goal_candidate_lst]
+        #                     break
+        #             except:
+        #                 print('ERROR: No valid goal')
         if self.goal_synonyms == None:
             self.goal_synonyms = [self.goal]
         

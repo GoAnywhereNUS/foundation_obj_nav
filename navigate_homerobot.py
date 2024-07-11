@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import torch
 
 from navigator import Navigator
-from scene_graph import SceneGraph, default_scene_graph_specs
+from open_scene_graph import default_scene_graph_specs
 import cv2
 import pdb
 
