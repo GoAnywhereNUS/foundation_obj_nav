@@ -333,9 +333,91 @@ class Prompts: # "Prompts" namespace in which to implement prompts
             return None
     
 
+    @register_prompt
+    class TextDescriptionEnvLayout(BasePrompt):
+        def generatePrompt(self, ctx: dict[str, str]) -> list[dict[str, str]]:
+            """
+            Input: ctx, dict containing descriptions of observed and candidate places
+            """
+
+            # TODO: Currently does not handle specs with more than one place class
+            context = self.template['ctx']
+            if 'spec_error_message' in ctx and 'chat_history' in ctx:
+                query = self.template['feedback'].format(
+                    spec_error_message = ctx['spec_error_message'],
+                    environment_type=ctx['environment_type']
+                )
+
+                chat = ctx['chat_history'] + [
+                    {"role": "user", "content": query}
+                ]
+            else:
+                query = self.template['query'].format(
+                    environment_type=ctx['environment_type']
+                )
+                chat = [
+                    {"role": "system", "content": context}
+                ] + [
+                    {"role": "user", "content": query}
+                ]
+            return chat
+        
+        def generateHandler(self, resp: str, ctx=None) -> Optional[bool]:
+            """
+            Input: resp, string response from LLM
+            Output: option, where None indicates an invalid response,
+                    otherwise a boolean indicating matching validity
+            """
+            answer = resp.split("Text:")[-1].lower()
+            if len(answer) != 0:
+                return answer
+            else:
+                return None
+  
+    @register_prompt
+    class TextToTriplets(BasePrompt):
+        def generatePrompt(self, ctx: dict[str, str]) -> list[dict[str, str]]:
+            """
+            Input: ctx, dict containing descriptions of observed and candidate places
+            """
+
+            # TODO: Currently does not handle specs with more than one place class
+            query = self.template['query'].format(
+                environment_type=ctx['environment_type'],
+                text_description=ctx['text_description']
+            )
+            chat = [
+                {"role": "system", "content": "You are a helpful assistant."}
+            ] + [
+                {"role": "user", "content": query}
+            ]
+            return chat
+        
+        def generateHandler(self, resp: str, ctx=None) -> Optional[bool]:
+            """
+            Input: resp, string response from LLM
+            Output: option, where None indicates an invalid response,
+                    otherwise a boolean indicating matching validity
+            """
+            answer = resp.split("Triplets:")[-1].lower()
+            pattern = re.compile(r"\[(.*?)\]")
+            matches = pattern.findall(answer)
+            triplet_lines = []
+            if len(matches) == 0:
+                return None
+            # Extract text from the triplets
+            for match in matches:
+                triplet = match.split(", ")
+                if len(triplet) < 3:
+                    return None
+                triplet_lines.append(triplet)
+            return triplet_lines
+
+    
 ###############################################################
         
 if __name__ == "__main__":
+    
     from open_scene_graph import default_scene_graph_specs
     OSG = OpenSceneGraph(default_scene_graph_specs)
     spec = OSG.getSpec()

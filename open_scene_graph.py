@@ -114,7 +114,7 @@ class OSGMetaStructure:
             1. Must have "is near" edges to Connectors/Objects given in spec
             2. Must have "connects to" edges to Places/Abstractions given in spec
         """
-        connectors_layer = layer_map[2]
+        connectors_layer = layer_map[2] if 2 in layer_map else []
         places_layer = layer_map[3]
         abstraction_layers = reduce(
             lambda L, k: L if k < 4 else L + [layer_map[k]], 
@@ -126,12 +126,12 @@ class OSGMetaStructure:
             
             allowed_classes = connectors_layer + ["object"]
             valid = OSGMetaStructure.checkEdgeSpecValid(connector_cls_spec, "is near", allowed_classes)
-            assert valid, f'{connector_cls} has no is near edges or has edges to invalid class'
+            assert valid, f'{connector_cls} is not near any valid items'
 
             allowed_classes = places_layer + abstraction_layers
             valid = OSGMetaStructure.checkEdgeSpecValid(
                 connector_cls_spec, "connects to", allowed_classes)
-            assert valid, f'{connector_cls} has no connects to edges or has edges to invalid class'
+            assert valid, f'{connector_cls} does not connect to any valid place layer'
 
     @staticmethod
     def checkAbstractionLayer(layer_map, spec, i):
@@ -140,7 +140,7 @@ class OSGMetaStructure:
             1. Must have contains edges to lower Abstractions or Places given in spec
             2. May have connects to edges to Connectors or itself
         """
-        connectors_layer = layer_map[2]
+        connectors_layer = layer_map[2] if 2 in layer_map else []
         places_layer = layer_map[3]
         lower_abstraction_layers = reduce(
             lambda L, k: L + [layer_map[k]] if k < 4 and k < i else [], 
@@ -151,7 +151,7 @@ class OSGMetaStructure:
 
         allowed_classes = places_layer + lower_abstraction_layers
         valid = OSGMetaStructure.checkEdgeSpecValid(abstraction_cls_spec, "contains", allowed_classes)
-        assert valid, f'{abstraction_cls} either has no contains edges or edges to an invalid class'
+        assert valid, f'{abstraction_cls} does not contain any valid place layer.'
         
         if (
             "connects to" in abstraction_cls_spec 
@@ -160,7 +160,7 @@ class OSGMetaStructure:
             allowed_classes = connectors_layer + [abstraction_cls]
             valid = OSGMetaStructure.checkValidClasses(
                 abstraction_cls_spec["connects to"], allowed_classes)
-            assert valid, f'{abstraction_cls} either has no connects to edges or edges to an invalid class'
+            assert valid, f'{abstraction_cls} does not connect to any valid region.'
             
     @staticmethod
     def checkEdgeSpecValid(spec, edge_type, allowed_classes):

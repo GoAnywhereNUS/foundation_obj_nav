@@ -95,3 +95,45 @@ ObjectDataAssociation:
       Answer: doorframe_3'
   query: >
     'We want to find a {target_node_with_feats}. Now we have seen the following objects: {existing_nodes_with_feats} Please select one object that is most likely to be the object I want to find. Please only select one object and use this element name in answer. Use the exact name in the given sentences. Always follow the format: Answer: <your answer>.'
+TextDescriptionEnvLayout:
+  ctx: >
+    You are a helpful system.
+  fewshot: ~
+  query: >
+    We are using texts to describe the environment layout. Please follow the meta-structure to describe the environment. 
+
+    Example:
+
+    Environment Type: household
+
+    Text: In the household environments, there are often three layers including room, entrance and object. Home contains various rooms. The room contains spatial region ans is Places in meta structure. Rooms can be connected to rooms or entrance. Entrances are Connectors in meta structure. Rooms contains objects. Entrance and Objects is near objects.
+
+    Based on the example, please return the text to describe {environment_type} layout. Object is always required. Follow the response format: Text: <your text>.
+  feedback: >
+    The text you generate contains the error: {spec_error_message}. Please fix this issue and re-generate the text to describe {environment_type} layout. Object is always required. Follow the response format: Text: <your text>.
+TextToTriplets:
+  ctx: ~
+  fewshot:
+    user_1: >
+      We use triplets to structure the text. Triplets follow the template: [Subject, Relation, Object].
+      Given the description of household environment: In the household environments, there are often three layers including room, entrance and object. Home contains various rooms. The room contains spatial region ans is Places in meta structure. Rooms can be connected to rooms or entrance. Entrances are Connectors in meta structure. Rooms contains objects. Entrance and Objects is near objects.
+      Please return the triplets of the household environment. Only allow "contains", "connects to", "contains" and "is near" relations. Follow the format: Triplets: <your triplets>.
+    assistant_1: >
+      Triplets:
+      [room, contains, object]
+      [room, connects, entrance]
+      [room, connects, room]
+      [entrance, is near, object]
+  query: >
+      We use triplets to structure the text. Triplets follow the template: [Subject, Relation, Object].
+      
+      Example:
+      Text: In the household environments, there are often three layers including room, entrance and object. Home contains various rooms. The room contains spatial region ans is Places in meta structure. Rooms can be connected to rooms or entrance. Entrances are Connectors in meta structure. Rooms contains objects. Entrance and Objects is near objects.
+      Triplets:
+      [room, contains, object]
+      [room, connects, entrance]
+      [room, connects, room]
+      [entrance, is near, object]
+
+      Based on the example, please return the triplets of {environment_type} environment. Only allow "contains", "connects to", "contains" and "is near" these relations. Follow the format: Triplets: <your triplets>. 
+      Text: {text_description}.
