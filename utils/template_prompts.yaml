@@ -97,7 +97,12 @@ ObjectDataAssociation:
     'We want to find a {target_node_with_feats}. Now we have seen the following objects: {existing_nodes_with_feats} Please select one object that is most likely to be the object I want to find. Please only select one object and use this element name in answer. Use the exact name in the given sentences. Always follow the format: Answer: <your answer>.'
 TextDescriptionEnvLayout:
   ctx: >
-    You are a helpful system.
+    You are a helpful system. Given a environment type, you are required to describe the environment layout based on the meta structure.
+    In meta structure, we define 4 abstract types of classes to describe the envitonment. 
+    1. Objects. Static scene elements occupying spatially localised regions: e.g. tables, chairs etc. They provide semantic cues for reasoning, and act as navigation goals and localisation landmarks - specifically, we distinguish Objects/Places with object features, aggregated lists of nearby objects. 
+    2. Places. The smallest semantically meaningful spatial regions in a scene, e.g. rooms in a home or aisles in a supermarket, which typically cannot be subdivided in a consistent, meaningful way. 
+    3. Region Abstractions. Spatial abstractions encompassing multiple smaller spatial regions: e.g. a floor containing multiple rooms, or a supermarket section that is a cluster of aisles.
+    4. Connectors. These are specific types of Objects that are also structural scene elements connecting spatial regions: e.g. doors connecting rooms, steps connecting floors.
   fewshot: ~
   query: >
     We are using texts to describe the environment layout. Please follow the meta-structure to describe the environment. 
@@ -117,7 +122,7 @@ TextToTriplets:
     user_1: >
       We use triplets to structure the text. Triplets follow the template: [Subject, Relation, Object].
       Given the description of household environment: In the household environments, there are often three layers including room, entrance and object. Home contains various rooms. The room contains spatial region ans is Places in meta structure. Rooms can be connected to rooms or entrance. Entrances are Connectors in meta structure. Rooms contains objects. Entrance and Objects is near objects.
-      Please return the triplets of the household environment. Only allow "contains", "connects to", "contains" and "is near" relations. Follow the format: Triplets: <your triplets>.
+      Please return the triplets of the household environment. Follow the format: Triplets: <your triplets>.
     assistant_1: >
       Triplets:
       [room, contains, object]
@@ -137,3 +142,19 @@ TextToTriplets:
 
       Based on the example, please return the triplets of {environment_type} environment. Only allow "contains", "connects to", "contains" and "is near" these relations. Follow the format: Triplets: <your triplets>. 
       Text: {text_description}.
+Canonicalization:
+  ctx: ~
+  query: >
+      Given a peice of text and a relational triplet extracted from it, and the definition of the relation in it, choose the most appropriate relation to replace it in this context if there is any and modify the triplet. If the entity is too specific, use the abstract word to replace it.
+      In the {environment_type}, {given_triplet[0]} {given_triplet[1]} {given_triplet[2]}. Triplet: {given_triplet}.
+
+      We define Connectors as the specific types of Objects that are also structural scene elements connecting spatial regions: e.g. doors or entrances connecting rooms, steps connecting floors. 
+      1. "contains": Specifies spatial containment relations among regions/objects. The subject entity contains the object entity. The subject entity is required to be a region or a place. Example: [room, connects to, room]
+      2. "connects to": Specifies reachability between the subject entity and object entity, and can connect Place, Region Abstraction, and Connectors. Object cannot "connects to" any other items. Example: [room, connects, entrance]
+      3. "is near": It approximately capture closeness between the subject entity and object entity. The subject entity and object entity must be Connector or objects. Example: [entrance, is near, object]
+      4. "invald": If the relation is none of the above, it is invalid. For example, the object cannot be near a place or a region.
+      
+      For entity names, if the subject entity or object entity is too specific, use an abstract word to replace it. For example, if products are a specific kind of object, we should replace it with "object". However, the entity name should be customized to the environment {environment_type}.
+      For example, in household environment, given [place, has, desk], we should modify it to [room, contains, object]. In household environment, given [connector, connects to, rooms], we should modify it to [entrance, connects to, room]. 
+
+      Please follow the format: Answer: <modified triplets>.

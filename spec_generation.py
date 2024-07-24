@@ -17,9 +17,13 @@ class AutoSpec:
         Input: String env_type, e.g. home
         """
         self.llm = LLMInterface(ModelLLMDriver_GPT())
-        self.max_trial = 10
+        self.max_trial = 5
+        self.env_type = env_type
         self.prompt_reg = PromptRegistry(None)
-        self.env_ctx = {'environment_type': env_type}
+        self.env_ctx = {'environment_type': self.env_type}
+
+    def reset(self):
+        self.env_ctx = {'environment_type':self.env_type}
 
     def getTextEnvLayout(self):
         generate_text_prompt, generate_text_resp_fn = self.prompt_reg.getPromptAndHandler(
@@ -79,12 +83,13 @@ class AutoSpec:
         layer_id = f" \"layer_id\": {layer_num}"
         
         current_layer_attr = {i: None for i in MetaStructure['relation']}
+        if layer_num == 3:
+            attr_set['contains'][layer] = ["object"]
+
         for attr in current_layer_attr.keys():
             if layer in attr_set[attr].keys():
                 current_layer_attr[attr] =  f" \"{attr}\": {list(set(attr_set[attr][layer]))}"
         
-        if layer_num == 3:
-            attr_set['contains'][layer] = ["object"]
         if layer_num >= 3:
             current_layer_attr['is near'] = None
 
@@ -98,6 +103,23 @@ class AutoSpec:
         layer_spec += "\n}," 
         return layer_spec
     
+    def Canonicalization(self, triplet_lines):
+        refined_triplet = []
+        for each_triplet in triplet_lines:
+            ctx = {'given_triplet': each_triplet, 'environment_type':self.env_ctx['environment_type']}
+            canonicalization_prompt, canonicalization_resp_fn = self.prompt_reg.getPromptAndHandler(
+                Prompts.Canonicalization, ctx)
+            valid, refined_triplets_resp = self.llm.query(
+                canonicalization_prompt,
+                canonicalization_resp_fn,
+                required_samples=1,
+                max_tries=10,
+            )
+            print('--- before triplets', each_triplet)
+            refined_triplet.append(refined_triplets_resp[0])
+            print('--- after triplets', refined_triplets_resp[0])
+        self.env_ctx['environment_triplets'] = refined_triplet
+        return refined_triplet
 
     def Triplets2Spec(self, triplet_lines):
         hierachy = nx.DiGraph()
@@ -106,9 +128,9 @@ class AutoSpec:
         attr_set = {i: {} for i in MetaStructure['relation']}
 
         for each_triplet in triplet_lines:
-            subject_i = each_triplet[0].replace("'", '"')
-            relation_i = each_triplet[1].replace("'", '"')
-            object_i = each_triplet[2].replace("'", '"')
+            subject_i = each_triplet[0]
+            relation_i = each_triplet[1]
+            object_i = each_triplet[2]
             ToBeAddNodes.append(subject_i)
             ToBeAddNodes.append(object_i)
 
@@ -119,7 +141,7 @@ class AutoSpec:
                         attr_set['contains'][subject_i] = [object_i]
                     else:
                         attr_set['contains'][subject_i].append(object_i)
-                else:
+                elif 'connect' in relation_i or 'near' in relation_i:
                     if subject_i not in attr_set[relation_i].keys():
                         attr_set[relation_i][subject_i] = [object_i]
                     else:
@@ -132,6 +154,8 @@ class AutoSpec:
         ToBeAddNodes = set(ToBeAddNodes)
 
         longest_path = self.find_longest_path(hierachy)
+        if len(longest_path) < 1:
+            return None
         if 'object' in longest_path[-1]:
             longest_path.remove(longest_path[-1])
         specs = ""
@@ -175,13 +199,14 @@ class AutoSpec:
     def generate(self):
         self.getTextEnvLayout()
         self.getTriplets()
+        self.Canonicalization(self.env_ctx['environment_triplets'])
         env_specs = self.Triplets2Spec(self.env_ctx['environment_triplets'])
-        env_specs = env_specs.replace("'", '"')
-        print(env_specs)
         return env_specs
     
     def verify(self, specs):
         try:
+            print(specs)
+            specs = specs.replace("'", '"')
             OpenSceneGraph(specs)
             print('[PASS]')
             return True, None
@@ -195,12 +220,17 @@ class AutoSpec:
         flag = self.verify(specs)
         trial = 0
         while not flag and trial < self.max_trial:
-            specs = self.generate()
-            flag = self.verify(specs)
+            feedback_trial = 0
+            while not flag and feedback_trial < self.max_trial:
+                specs = self.generate()
+                flag = self.verify(specs)
+                feedback_trial += 1
             trial += 1
+            self.reset()
         return specs
 
-autospec_instance = AutoSpec('amusement park')
+
+autospec_instance = AutoSpec('hospital')
 autospec_instance.loop()
 # specs = autospec_instance.generate()
 # print(specs)
@@ -224,5 +254,4 @@ autospec_instance.loop()
 # """
 # OpenSceneGraph(specs)
 
-breakpoint()
 

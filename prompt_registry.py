@@ -381,7 +381,6 @@ class Prompts: # "Prompts" namespace in which to implement prompts
             Input: ctx, dict containing descriptions of observed and candidate places
             """
 
-            # TODO: Currently does not handle specs with more than one place class
             query = self.template['query'].format(
                 environment_type=ctx['environment_type'],
                 text_description=ctx['text_description']
@@ -410,10 +409,54 @@ class Prompts: # "Prompts" namespace in which to implement prompts
                 triplet = match.split(", ")
                 if len(triplet) < 3:
                     return None
+                for i in range(len(triplet)):
+                    triplet[i] = triplet[i].replace("'", '"')
                 triplet_lines.append(triplet)
             return triplet_lines
 
-    
+    @register_prompt
+    class Canonicalization(BasePrompt):
+        def generatePrompt(self, ctx: dict[str, str]) -> list[dict[str, str]]:
+            """
+            Input: ctx, dict containing descriptions of observed and candidate places
+            """
+
+            query = self.template['query'].format(
+                environment_type=ctx['environment_type'],
+                given_triplet=ctx['given_triplet']
+            )
+            chat = [
+                {"role": "system", "content": "You are a helpful assistant."}
+            ] + [
+                {"role": "user", "content": query}
+            ]
+            return chat
+        
+        def generateHandler(self, resp: str, ctx=None) -> Optional[bool]:
+            """
+            Input: resp, string response from LLM
+            Output: option, where None indicates an invalid response,
+                    otherwise a boolean indicating matching validity
+            """
+            answer = resp.split("Triplets:")[-1].lower()
+            pattern = re.compile(r"\[(.*?)\]")
+            matches = pattern.findall(answer)
+            if len(matches) == 0:
+                return None
+            # Extract text from the triplets
+            for match in matches:
+                triplet = match.split(", ")
+                if len(triplet) < 3:
+                    return None
+                for i in range(len(triplet)):
+                    triplet[i] = triplet[i].strip("'")
+                return triplet
+            # answer = resp.split("Answer: ")[-1][0]
+            # if answer in ctx['choice']:
+            #     return answer
+            return None
+
+
 ###############################################################
         
 if __name__ == "__main__":
