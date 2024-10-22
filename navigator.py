@@ -6,6 +6,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from mapper import OSGMapper
+from reasoner import Reasoner
 from utils.vis_utils import Visualiser
 import json
 
@@ -36,9 +37,6 @@ class Navigator:
 
         self.trial_folder = self.create_log_folder()
         self.action_log_path = os.path.join(self.trial_folder, 'action.txt')
-        self.action_logging = open(
-            self.action_log_path, 'a'
-        )
 
         # Note: Env and controller to be implemented in subclass
 
@@ -51,6 +49,7 @@ class Navigator:
         self.vis_image = np.ones((100, 100, 3))
 
         self.mapper = OSGMapper()
+        self.reasoner = Reasoner(action_log_path=self.action_log_path)
 
         self.tmp_path = []
 
@@ -72,9 +71,7 @@ class Navigator:
         # Reset logging
         self.trial_folder = self.create_log_folder()
         self.action_log_path = os.path.join(self.trial_folder, 'action.txt')
-        self.action_logging = open(
-            self.action_log_path, 'a'
-        )
+        self.reasoner.reset(self.action_log_path)
 
     def create_log_folder(log_folder = 'logs'):
         logs_folder = 'logs'
@@ -130,9 +127,11 @@ class Navigator:
                 return True
         return False 
 
-    def loop(self, obs):
-        print(">>>>> Decision-making")
+    def loop(self, obs, run_planning=True):
         print("Goal:", self.goal, "| Path", self.tmp_path)
+
+        # Mapping
+        print(">>> Mapping")
         parsed = self.mapper.parseImage(obs)
         prev_state = None if len(self.tmp_path) == 0 else self.tmp_path[-1]
         state = self.mapper.estimateState(prev_state, parsed)
@@ -143,20 +142,35 @@ class Navigator:
             print(f"Adding current state {state} to path as Place!")
             self.tmp_path.append(state)
         
-        while True:
-            try:
-                selected_goal = input('Please provide the selected goal as <view> <bbox_id>, e.g. forward 2:\n')
-                print(f"Got: {selected_goal}")
-                if selected_goal.strip().lower() == "q":
-                    import sys; sys.exit(0)
-                
-                view, bbox_id = selected_goal.split(' ')
-                bbox_id = int(bbox_id)
-                valid = (view in object_nodes) and len(object_nodes[view]) > bbox_id
-                if valid:
-                    break
-            except:
-                pass
+        # Planning (or manual subgoal selection)
+        if run_planning:
+            # Use LLM-based Reasoner for planning
+            next_subgoal_key, prev_subgoal_key = self.reasoner.generateExplorationPlan(
+                self.goal, state, self.mapper.OSG
+            )
+            next_subgoal_node = self.mapper.OSG.getNode(next_subgoal_key)
+            in_view = next_subgoal_node["in_view"]
+            if in_view is not None:
+                view, bbox_id = in_view
+            else:
+                return None, None
+
+        else:
+            # Allow user to manually select subgoal
+            while True:
+                try:
+                    selected_goal = input('Please provide the selected goal as <view> <bbox_id>, e.g. forward 2:\n')
+                    print(f"Got: {selected_goal}")
+                    if selected_goal.strip().lower() == "q":
+                        import sys; sys.exit(0)
+                    
+                    view, bbox_id = selected_goal.split(' ')
+                    bbox_id = int(bbox_id)
+                    valid = (view in object_nodes) and len(object_nodes[view]) > bbox_id
+                    if valid:
+                        break
+                except:
+                    pass
 
         selected_node, selected_bbox = object_nodes[view][bbox_id]
         if self.mapper.OSG.isConnector(selected_node):
@@ -168,3 +182,14 @@ class Navigator:
         print(">>>>>")
         self.last_subgoal = self.tmp_path
         return selected_bbox, view
+
+    def test_loc(self, obs1, obs2):
+        self.mapper.reset()
+        parsed1 = self.mapper.parseImage(obs1)
+        state = self.mapper.estimateState(None, parsed1)
+        state, _ = self.mapper.updateOSG(state, [], parsed1)
+
+        # Test new observation against scene graph
+        parsed2 = self.mapper.parseImage(obs2)
+        result = self.mapper.estimateState(state, parsed2)
+        return not isinstance(result, tuple)

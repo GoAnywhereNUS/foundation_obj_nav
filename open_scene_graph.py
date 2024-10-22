@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 from functools import reduce
 from dataclasses import dataclass
-from typing import Any, Union
+from typing import Any, Union, Optional
 
 ######## Scene graph specs ########
 
@@ -49,8 +49,8 @@ class OSGMetaStructure:
     """
 
     node_templates = {
-        'Object': {'label': str, 'id': int, 'description': str, 'image': torch.Tensor},
-        'Connector': {'label': str, 'id': int, 'description': str, 'image': torch.Tensor},
+        'Object': {'label': str, 'id': int, 'description': str, 'image': torch.Tensor, 'in_view': Optional[tuple[str, int]]},
+        'Connector': {'label': str, 'id': int, 'description': str, 'image': torch.Tensor, 'in_view': bool},
         'Place': {'class': str, 'label': str, 'id': int},
         'Region Abstraction': {'label': str, 'id': int},
     }
@@ -422,6 +422,9 @@ class OpenSceneGraph:
     def getNearbyNodes(self, node_key: type[NodeKey]):
         return self.getDestNodes(node_key, "is near")
     
+    def getSubgraphFromNodes(self, node_list):
+        return self.G.subgraph(node_list)
+    
     def getNodeObjectFeatures(
         self, 
         node_key: type[NodeKey], 
@@ -445,7 +448,7 @@ class OpenSceneGraph:
         src_node_key: type[NodeKey],
         dst_node_keys: list[type[NodeKey]],
     ):
-        spatial_subgraph_view = self._getSpatialSubgraph()
+        spatial_subgraph_view = self.getSpatialSubgraph()
         lengths = []
         for dst in dst_node_keys:
             try:
@@ -484,7 +487,7 @@ class OpenSceneGraph:
         ]
         return sum(instances) + 1 # 1-indexed
     
-    def _getSpatialSubgraph(self):
+    def getSpatialSubgraph(self):
         """
         Extracts a subgraph representing the scene's spatial topology from 
         the OSG. Specifically, this is the subgraph of all the Places and
@@ -497,7 +500,7 @@ class OpenSceneGraph:
         nodes = [node for node in self.G.nodes() if isPlaceConnector(node)]
         return self.G.subgraph(nodes)
     
-    ### Visualisation utilities
+    ### Utilities for visualisation and printing
     def visualise(self, show_layers=[], show_layer_1_for_node=None):
         """
         Visualizes the hierarchical graph.
@@ -512,7 +515,7 @@ class OpenSceneGraph:
             return edge_colors.get(self.G[u][v].get('edge_type', 'type1'), 'black')
 
         # Create subgraph for layers 2 and 3
-        spatial_subgraph = self._getSpatialSubgraph()
+        spatial_subgraph = self.getSpatialSubgraph()
 
         # Extract nodes for each layer
         layer_nodes = {
@@ -566,6 +569,9 @@ class OpenSceneGraph:
         
         plt.title("Hierarchical Graph Visualization")
         plt.savefig("imgs/osg.png")
+
+    def printGraph(self):
+        raise NotImplementedError
     
 
 if __name__ == "__main__":

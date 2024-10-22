@@ -455,6 +455,60 @@ class Prompts: # "Prompts" namespace in which to implement prompts
             # if answer in ctx['choice']:
             #     return answer
             return None
+        
+    class ProposeRegionSubgoal(BasePrompt):
+        def generatePrompt(self, ctx):
+            query = self.template['query'].format(
+                scene_graph_layer=ctx['scene_graph_layer'],
+                goal=ctx['goal'],
+                region=ctx['region'],
+                explored_list=ctx['explored_list'],
+            )
+            fewshot = self.template['fewshot']
+
+            chat = [
+                {"role": "system", "content": "You are a helpful assistant."}
+            ] + [
+                {"role": k.split('_')[0], "content": v} for k, v in fewshot.items()
+            ] + [
+                {"role": "user", "content": query}
+            ]            
+
+        def generateHandler(
+            self,
+            resp: str, 
+            ctx: dict[str, Any]
+        ) -> Optional[type[OpenSceneGraph.NodeKey]]:
+            node_name = resp.split("Answer:")[-1].strip()
+            if node_name in ctx['nodes']:
+                return ctx['nodes'][node_name][0]
+            return None
+
+    class ProposeObjectSubgoal(BasePrompt):
+        def generatePrompt(self, ctx):
+            query = self.template['query'].format(
+                object_list=ctx['object_list'],
+                goal=ctx['goal']
+            )
+            fewshot = self.template['fewshot']
+
+            chat = [
+                {"role": "system", "content": "You are a helpful assistant."}
+            ] + [
+                {"role": k.split('_')[0], "content": v} for k, v in fewshot.items()
+            ] + [
+                {"role": "user", "content": query}
+            ]            
+
+        def generateHandler(
+            self,
+            resp: str, 
+            ctx: dict[str, Any]
+        ) -> Optional[type[OpenSceneGraph.NodeKey]]:
+            node_name = resp.split("Answer:")[-1].strip()
+            if node_name in ctx['nodes']:
+                return ctx['nodes'][node_name][0]
+            return None
 
 
 ###############################################################

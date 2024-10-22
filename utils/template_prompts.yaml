@@ -167,3 +167,55 @@ Canonicalization:
       For example, in household environment, given [place, has, desk], we should modify it to [room, contains, object]. In household environment, given [connector, connects to, rooms], we should modify it to [entrance, connects to, room]. 
 
       Please follow the format: Answer: <modified triplets>.
+ProposeRegionSubgoal:
+  ctx: ~
+  fewshot:
+    user_1: >
+      You see the partial layout of the apartment: 
+      {"room": {"livingroom_1", "connects to": ["door_1", "door_2"]}, "diningroom_1": {,"connects to": ["door_1"]}}, "entrance": {"door_1": {"is near": ["towel_1"], "connects to": ["livingroom_1", "diningroom_1"]}, "door_2": {"is near": [], "connects to": ["livingroom_1"]}}}
+      Question: Your goal is to find a sink. If any of the rooms in the layout are likely to contain the target object, specify the most probable room name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found.
+    assistant_1: >
+      Reasoning: There is only livingroom in the layout. livingroom is not likely to contain sink, so I will not explore the current room. Among all the doors, door1 is near to towel. A towel is usually more likely to near the bathroom or kitchen, so it is likely that if you explore door1 you will find a bathroom or kitchen and thus find a sink. 
+      Answer: door_1
+    user_2: >
+      You see the partial layout of the apartment: 
+      {"room": {"livingroom_1": {"connects to": ["doorway_1", "door_2"]}, "entrance": {"doorway_1": {"is near": ["table_1"]}, "door_2": {"is near": ["clock_1"], "connects to": ["livingroom_1" ]}}} 
+      Question: Your goal is to find a oven. If any of the rooms in the layout are likely to contain the target object, specify the most probable room name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found.
+    assistant_2: >
+      Reasoning: There are only livingroom in the layout. Among all the rooms, livingroom is usually unlikely to contain oven, making it less likely for me to find oven in the current room. Instead, I plan to explore other rooms connected to current living room via entrances. Evaluating the entrances, doorway1 stands out as it is close to a table. Tables are commonly found in kitchens, which often contain ovens. Therefore, I have decided to explore through doorway_1.
+      Answer: doorway_1
+    user_3: >
+      You see the partial layout of the apartment: 
+      {"room": {"kitchen_1": {"connects to": ["stair_1"]}, "livingroom": {"connects to": ["stair_1"]}, "entrance": {"stair_1": {"is near": []}}}}
+      Question: Your goal is to find a sink. If any of the rooms in the layout are likely to contain the target object, specify the most probable room name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found.
+    assistant_3: >
+      Reasoning: There are kitchen and livingroom in the layout. Among all the rooms, kitchen is usually likely to contain sink. Since we haven't explored the kitchen yet, it is possible that the sink is in the kitchen. Therefore, I will explore kitchen. 
+      Answer: kitchen_1
+    user_4: >
+      You see the partial layout of the apartment: 
+      {"room": {"livingroom_1": {"connects to": []}}} 
+      Question: Your goal is to find a sink. If any of the rooms in the layout are likely to contain the target object, specify the most probable room name. If all the room are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found.
+    assistant_4: >  
+      Reasoning: There is only livingroom in the layout. livingroom is not likely to contain sink, but there is no entrance/door/doorway in the layout. Therefore, there is no entrance to explore, I have to reply the current room name.
+      Answer: livingroom_1
+  query: >
+    You see the partial layout of the apartment: 
+    {scene_graph_layer}
+    Question: Your goal is to find a {goal}. If any of the {region}s in the layout are likely to contain the target object, reply the most probable {region} name, not any door name. If all the {region} are not likely contain the target object, provide the door you would select for exploring a new room where the target object might be found. Follow my format to state reasoning and answer. Please only use one word in answer.
+    The following has been explored: {explored_list}. Please don't reply explored place or object.
+ProposeObjectSubgoal:
+  ctx: ~
+  fewshot:
+    user_1: >
+      There is a list: ["mirror_2", "lamp_1", "picture_7", "tool_6", "toilet_8", "sofa_11", "floor_12", "wall_13"]. Please select one object that is most likely located near a sink. Always follow the format: Answer: <your answer>.
+    agent_1: >
+      Reasoning: Among the given options, the object most likely located near a sink is a "mirror." Mirrors are commonly found near sinks in bathrooms for personal grooming and hygiene activities.
+      Answer: mirror_2
+    user_2: >
+      There is a list: ["chair_4", "sofa_2", "bed_9", "dresser_1","ceiling_6","closet_5", "window_7", "wall_10"]. Please select one object that is most likely located near a table. Always follow the format: Answer: <your answer>.
+    agent_2: >
+      Reasoning: Among the given options, the object most likely located near a table is a "chair." Chairs are commonly placed around tables for seating during various activities such as dining, working, or socializing.
+      Answer: chair_4
+  query: >
+    There is a list: {object_list}
+    Please select one object that is most likely located near a {goal}. Please only select one object in the list and use this element name in answer. Use the exact name in the list. Always follow the format: Answer: <your answer>."

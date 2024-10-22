@@ -326,6 +326,12 @@ class OSGMapper:
         print("***** Path:", path)
         t1 = time.time()
 
+        # Reset all object/connector nodes to be out of view. We will update later
+        # whether the nodes are in the agent's field-of-view.
+        leaf_node_keys = self.OSG.getLayer(1) + self.OSG.getLayer(2)
+        for node_key in leaf_node_keys:
+            self._updateLeafNodeAttribs(node_key, in_view=None)
+
         object_nodes = dict()
         if isinstance(est_state, tuple):
             # Currently in an unrecognisable location. Check against the
@@ -398,7 +404,7 @@ class OSGMapper:
                 for obs_id, is_valid_assoc, assoc_node in assocs:
                     cls, obj = flattened_objs[obs_id]
                     if is_valid_assoc: # obs_id is associated to existing OSG node
-                        self._updateLeafNodeAttribs(assoc_node, obj)
+                        self._updateLeafNodeAttribs(assoc_node, obs=obj, in_view=(view, obs_id))
                         nodes.append(assoc_node)
                     else: # No valid association to existing node found
                         node = self._addLeafNode(cls, obj)
@@ -504,7 +510,7 @@ class OSGMapper:
     def _addLeafNode(self, cls: str, obs: tuple) -> type[OpenSceneGraph.NodeKey]:
         _, lbl, attr, _, crop, _ = obs
         object_attribs = self.OSG.makeNewNodeAttrs(cls, {
-            "label": lbl, "description": attr, "image": crop
+            "label": lbl, "description": attr, "image": crop, 'in_view': None
         })
         return self.OSG.addNode(cls, object_attribs)
     
@@ -518,13 +524,14 @@ class OSGMapper:
     def _updateLeafNodeAttribs(
         self,
         node_key: type[OpenSceneGraph.NodeKey],
-        obs: tuple,
+        obs: tuple = None,
+        in_view: Optional[tuple[str, int]] = None,
     ):
-        _, lbl, attr, _, crop, _ = obs
-        update_dict = { # Currently only update the attributes and image
-            "description": attr,
-            "image": crop,
-        }
+        update_dict = { "in_view": in_view }
+        if obs is not None:
+            _, lbl, attr, _, crop, _ = obs
+            update_dict["description"] = attr
+            update_dict["image"] = crop
         self.OSG.setNodeAttrs(node_key, update_dict)
 
     def _getSimilarPlaces(
