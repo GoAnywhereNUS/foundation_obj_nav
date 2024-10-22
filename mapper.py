@@ -43,7 +43,7 @@ class OSGMapper:
             "obdet" : ModelObjectDriver_GroundingDINO,
         },
         spec_str=default_scene_graph_specs,
-        logging=True,
+        # logging=True,
     ):
         """
         Input: spec, JSON string
@@ -68,6 +68,21 @@ class OSGMapper:
             "state": False,
             "update": False,
         }
+
+        # Configure the logging
+        self.log_file_path = 'eval.log'
+        with open(self.log_file_path, 'w') as f:
+            f.write("Log initialized.\n")
+
+    def write_log(self, message):
+        # Open the file in append mode and write the message
+        with open(self.log_file_path, 'a') as f:
+            f.write(message + "\n")
+
+    def reset(self, spec_str=default_scene_graph_specs):
+        self.OSG = OpenSceneGraph(spec_str)
+        self.spec = self.OSG.getSpec()
+        self.prompt_reg = PromptRegistry(self.spec)
 
     def parseImage(self, obs: dict[str, dict[str, Any]]):
         """
@@ -250,8 +265,11 @@ class OSGMapper:
             match_prompt_ctx = {'obs': observed_place_desc, 'candidate': None}
 
             # Get Places that are semantically similar to observed Place
-            similar_place_nodes = self._getSimilarPlaces(
-                consensus_place_label, llm_matching=False)
+            # similar_place_nodes = self._getSimilarPlaces(
+            #     consensus_place_label, llm_matching=False)
+            similar_place_nodes = self.OSG.getLayer(3)
+            print(similar_place_nodes)
+            print(prev_state)
             shortest_path_lengths = self.OSG.getShortestPathLengths(
                 prev_state, similar_place_nodes)
             sorted_idxs = np.argsort(shortest_path_lengths) # increasing dist to last known state 
@@ -273,10 +291,19 @@ class OSGMapper:
                     match_prompt,
                     match_handle_resp_fn,
                     required_samples=5,
+                    get_raw_response=False,
                 )
+                # valid, match_resp, raw_resp = self.llm.query(
+                #     match_prompt,
+                #     match_handle_resp_fn,
+                #     required_samples=5,
+                #     get_raw_responses=True,
+                # )
                 t4 = time.time()
                 print("***** Timing:", t4 - t3)
                 print("***** Pairwise Place Match:", place_node, valid, match_resp)
+                self.write_log(str(match_resp))
+                # self.write_log(str(raw_resp))
                 if (
                     valid and
                     Counter(match_resp).most_common(1)[0][0] # consensus is a match

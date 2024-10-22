@@ -325,8 +325,10 @@ class LLMInterface:
         validate_fn: Callable[[list[Any]], list[Any]],
         required_samples: int = 1,
         max_tries: int = 3,
+        get_raw_responses: bool = False,
     ):
         answers = []
+        raw_answers = []
         valid = False
         remaining_samples_needed = required_samples
         for _ in range(max_tries):
@@ -336,13 +338,18 @@ class LLMInterface:
                 validated_resp = validate_fn(choice.message.content)
                 if validated_resp is not None:
                     answers.append(validated_resp)
+                if get_raw_responses:
+                    raw_answers.append(choice.message.content)
 
             remaining_samples_needed = required_samples - len(answers)
             valid = remaining_samples_needed <= 0
             if valid:
                 break
 
-        return valid, answers
+        if get_raw_responses:
+            return valid, answers, raw_answers
+        else:
+            return valid, answers
 
 
 class VQAPerception:
