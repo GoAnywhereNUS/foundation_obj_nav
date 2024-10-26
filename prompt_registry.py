@@ -455,7 +455,8 @@ class Prompts: # "Prompts" namespace in which to implement prompts
             # if answer in ctx['choice']:
             #     return answer
             return None
-        
+    
+    @register_prompt
     class ProposeRegionSubgoal(BasePrompt):
         def generatePrompt(self, ctx):
             query = self.template['query'].format(
@@ -472,7 +473,8 @@ class Prompts: # "Prompts" namespace in which to implement prompts
                 {"role": k.split('_')[0], "content": v} for k, v in fewshot.items()
             ] + [
                 {"role": "user", "content": query}
-            ]            
+            ]
+            return chat
 
         def generateHandler(
             self,
@@ -481,9 +483,10 @@ class Prompts: # "Prompts" namespace in which to implement prompts
         ) -> Optional[type[OpenSceneGraph.NodeKey]]:
             node_name = resp.split("Answer:")[-1].strip()
             if node_name in ctx['nodes']:
-                return ctx['nodes'][node_name][0]
+                return ctx['nodes'][node_name]
             return None
 
+    @register_prompt
     class ProposeObjectSubgoal(BasePrompt):
         def generatePrompt(self, ctx):
             query = self.template['query'].format(
@@ -498,7 +501,8 @@ class Prompts: # "Prompts" namespace in which to implement prompts
                 {"role": k.split('_')[0], "content": v} for k, v in fewshot.items()
             ] + [
                 {"role": "user", "content": query}
-            ]            
+            ]
+            return chat
 
         def generateHandler(
             self,
@@ -507,7 +511,7 @@ class Prompts: # "Prompts" namespace in which to implement prompts
         ) -> Optional[type[OpenSceneGraph.NodeKey]]:
             node_name = resp.split("Answer:")[-1].strip()
             if node_name in ctx['nodes']:
-                return ctx['nodes'][node_name][0]
+                return ctx['nodes'][node_name]
             return None
 
 

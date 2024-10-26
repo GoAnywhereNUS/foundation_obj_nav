@@ -12,27 +12,33 @@ from prompt_registry import PromptRegistry, Prompts
 class Reasoner:
     def __init__(
         self, 
+        spec,
+        action_logger,
         models = {"llm": ModelLLMDriver_GPT}, 
-        action_log_path = "action.txt",
     ):
         self.llm = LLMInterface(models["llm"]())
-        self.prompt_reg = PromptRegistry(self.spec)
-        self.action_log_path = action_log_path
-        self.action_logging = open(action_log_path, 'a')
-        self.explored_list = []
+        self.prompt_reg = PromptRegistry(spec)
+        self.action_logging=action_logger
 
-    def reset(self, action_log_path):
-        self.action_log_path = action_log_path
-        self.action_logging = open(self.action_log_path, 'a')
+    def reset(self, action_logger):
+        self.action_logging = action_logger
 
-    def _proposeRegionSubgoal(self, subgraph, goal, region):
+    def _proposeRegionSubgoal(
+        self, 
+        subgraph_string, 
+        subgraph_nodes,
+        goal, 
+        region, 
+        explored_nodes
+    ):
         region_prompt, region_handle_resp_fn = self.prompt_reg.getPromptAndHandler(
             Prompts.ProposeRegionSubgoal, 
             ctx={
-                "scene_graph_layer": subgraph, # TODO: Convert to string
+                "scene_graph_layer": subgraph_string,
                 "goal": goal,
                 "region": region,
-                "explored_list": self.explored_list, # TODO: Generate explored list
+                "explored_list": explored_nodes,
+                "nodes": { str(node): node for node in subgraph_nodes }
             }
         )
         valid, resp = self.llm.query(
@@ -42,29 +48,37 @@ class Reasoner:
             max_tries=10,
         )
 
-        if valid and Counter(resp).most_common(1)[0][0]:
-            return resp
+        print("@@@", resp)
+
+        if valid:
+            return Counter(resp).most_common(1)[0][0]
         
         # TODO: Should return the current state
         return None
     
-    def _proposeObjectSubgoal(self, goal, object_list):
+    def _proposeObjectSubgoal(self, goal, object_node_list):
         object_prompt, object_handle_resp_fn = self.prompt_reg.getPromptAndHandler(
             Prompts.ProposeObjectSubgoal,
             ctx={
-                "object_list": object_list,
-                "goal": goal
+                "object_list": [str(node) for node in object_node_list],
+                "goal": goal,
+                "nodes": { str(node): node for node in object_node_list }
             }
         )
-        valid, resp = self.llm.query(
+        valid, resp, raw = self.llm.query(
             object_prompt,
             object_handle_resp_fn,
             required_samples=5,
             max_tries=10,
+            get_raw_responses=True
         )
 
-        if valid and Counter(resp).most_common(1)[0][0]:
-            return resp
+        print("~~~ Propose object subgoal")
+        print(raw)
+        print(resp)
+
+        if valid:
+            return Counter(resp).most_common(1)[0][0]
         
         # TODO: Check this
         return None
@@ -83,21 +97,34 @@ class Reasoner:
     def generateExplorationPlan(self, goal, curr_state, OSG):
         spec = OSG.getSpec()
         max_layer_id = spec.getHighestLayerId()
-        subgraph = OSG.getLayer(max_layer_id)
+        # subgraph = OSG.getLayer(max_layer_id)
+        subgraph = OSG.getLayerSubgraph(max_layer_id)
 
         for layer_id in range(max_layer_id, 2, -1):
+            explored_nodes = [k for k in subgraph.nodes() if OSG.isNodeExplored(k) == True]
             subgoal_region = self._proposeRegionSubgoal(
-                subgraph,
+                OSG.printGraph(subgraph=subgraph),
+                subgraph.nodes(),
                 goal,
-                spec.getLayerClasses(layer_id)
+                spec.getLayerClasses(layer_id),
+                explored_nodes,
             )
-            child_nodes = OSG.getChildNodes(subgoal_region)
-            subgraph = OSG.getSubgraphFromNodes(child_nodes)
+            subgraph = OSG.getLayerSubgraph(layer_id)
+            print(f"[Subgoal region] {subgoal_region}")
 
-        # Filter out child nodes that are not in view
-        child_nodes = [node for node in child_nodes if OSG.getNode(node)["in_view"]]
+        # Keep only child nodes that are in view, and which also are not explored
+        # or cannot be explored (because they are objects)
+        child_nodes = [
+            node for node in OSG.getChildNodes(subgoal_region)
+            if len(OSG.getNode(node)["in_view"]) > 0 and (OSG.isNodeExplored != True)
+        ]
+
+        print("======")
+        for node in OSG.getChildNodes(subgoal_region):
+            print(OSG.getNode(node))
+
         print(f"[Child nodes]: {child_nodes}")
-        # self.action_logging.write(f'[Child nodes]: {child_nodes}')
+        self.action_logging.write(f'[Child nodes]: {child_nodes}')
 
         # Plan a path to the proposed region subgoal
         path = self._planPath(curr_state, subgoal_region, OSG.getSpatialSubgraph())
@@ -111,6 +138,8 @@ class Reasoner:
             subgoal_object = self._proposeObjectSubgoal(path[1], child_nodes)
 
         last_subgoal = path[0]
+        print(f"[Path] {path}")
+        print(f"[Subgoal] {subgoal_object}")
         self.action_logging.write(f'[PLAN INFO] Path:{path}\n')
         self.action_logging.write(f'[Next subgoal]: {subgoal_object} | [Last subgoal]: {last_subgoal}')
 

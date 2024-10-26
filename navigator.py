@@ -37,6 +37,7 @@ class Navigator:
 
         self.trial_folder = self.create_log_folder()
         self.action_log_path = os.path.join(self.trial_folder, 'action.txt')
+        self.action_logging = open(self.action_log_path, 'a')
 
         # Note: Env and controller to be implemented in subclass
 
@@ -49,7 +50,7 @@ class Navigator:
         self.vis_image = np.ones((100, 100, 3))
 
         self.mapper = OSGMapper()
-        self.reasoner = Reasoner(action_log_path=self.action_log_path)
+        self.reasoner = Reasoner(spec=self.mapper.spec, action_logger=self.action_logging)
 
         self.tmp_path = []
 
@@ -71,7 +72,7 @@ class Navigator:
         # Reset logging
         self.trial_folder = self.create_log_folder()
         self.action_log_path = os.path.join(self.trial_folder, 'action.txt')
-        self.reasoner.reset(self.action_log_path)
+        self.action_logging = open(self.action_log_path, 'a')
 
     def create_log_folder(log_folder = 'logs'):
         logs_folder = 'logs'
@@ -137,6 +138,7 @@ class Navigator:
         state = self.mapper.estimateState(prev_state, parsed)
         state, object_nodes = self.mapper.updateOSG(state, self.tmp_path, parsed)
         self.mapper.visualiseOSG(state)
+        print(self.mapper.OSG.printGraph(output_json=False))
 
         if len(self.tmp_path) == 0 or state != self.tmp_path[-1]:
             print(f"Adding current state {state} to path as Place!")
@@ -148,6 +150,7 @@ class Navigator:
             next_subgoal_key, prev_subgoal_key = self.reasoner.generateExplorationPlan(
                 self.goal, state, self.mapper.OSG
             )
+            print(next_subgoal_key)
             next_subgoal_node = self.mapper.OSG.getNode(next_subgoal_key)
             in_view = next_subgoal_node["in_view"]
             if in_view is not None:

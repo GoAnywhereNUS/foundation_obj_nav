@@ -267,7 +267,7 @@ class OSGMapper:
             # Get Places that are semantically similar to observed Place
             # similar_place_nodes = self._getSimilarPlaces(
             #     consensus_place_label, llm_matching=False)
-            similar_place_nodes = self.OSG.getLayer(3)
+            similar_place_nodes = self.OSG.getLayerNodes(3)
             print(similar_place_nodes)
             print(prev_state)
             shortest_path_lengths = self.OSG.getShortestPathLengths(
@@ -291,7 +291,7 @@ class OSGMapper:
                     match_prompt,
                     match_handle_resp_fn,
                     required_samples=5,
-                    get_raw_response=False,
+                    get_raw_responses=False,
                 )
                 # valid, match_resp, raw_resp = self.llm.query(
                 #     match_prompt,
@@ -326,14 +326,20 @@ class OSGMapper:
         print("***** Path:", path)
         t1 = time.time()
 
+        # Update last visited state to be "explored"
+        if len(path) > 0:
+            prev_state = path[-1]
+            self._updateNodeAttribs(prev_state, {"explored": True})
+
         # Reset all object/connector nodes to be out of view. We will update later
         # whether the nodes are in the agent's field-of-view.
-        leaf_node_keys = self.OSG.getLayer(1) + self.OSG.getLayer(2)
+        leaf_node_keys = self.OSG.getLayerNodes(1) + self.OSG.getLayerNodes(2)
         for node_key in leaf_node_keys:
-            self._updateLeafNodeAttribs(node_key, in_view=None)
+            self._updateNodeAttribs(node_key, {"in_view": tuple()})
 
         object_nodes = dict()
-        if isinstance(est_state, tuple):
+        in_novel_place = isinstance(est_state, tuple)
+        if in_novel_place:
             # Currently in an unrecognisable location. Check against the
             # OSG specification to see if this location can be connected back
             # to the current OSG.
@@ -361,7 +367,10 @@ class OSGMapper:
 
                 # For this view, add new leaf nodes and connect them to Place
                 for cls, objects in data["objects"].items():
-                    added_nodes = [self._addLeafNode(cls, o) for o in objects]
+                    added_nodes = [
+                        self._addLeafNode(cls, o, (view, i)) 
+                        for i, o in enumerate(objects)
+                    ]
                     nodes += added_nodes
                     neighbours += [nidxs for _, _, _, _ , _, nidxs in objects]
 
@@ -380,7 +389,8 @@ class OSGMapper:
                     [obj[3] for objs in data["objects"].values() for obj in objs]
                 ))
             
-            # Update region abstractions
+            # TODO: Update region abstractions
+            # Remember to iterate upwards and update attributes, including "explored"!
             for _ in range(4, self.spec.getHighestLayerId() + 1):
                 pass
         else:
@@ -404,10 +414,14 @@ class OSGMapper:
                 for obs_id, is_valid_assoc, assoc_node in assocs:
                     cls, obj = flattened_objs[obs_id]
                     if is_valid_assoc: # obs_id is associated to existing OSG node
-                        self._updateLeafNodeAttribs(assoc_node, obs=obj, in_view=(view, obs_id))
+                        # self._updateLeafNodeAttribs(assoc_node, obs=obj, in_view=(view, obs_id))
+                        _, lbl, attr, _, crop, _ = obj
+                        self._updateNodeAttribs(assoc_node, 
+                            {"description": attr, "image": crop, "in_view": (view, obs_id)}
+                        )
                         nodes.append(assoc_node)
                     else: # No valid association to existing node found
-                        node = self._addLeafNode(cls, obj)
+                        node = self._addLeafNode(cls, obj, (view, obs_id))
                         edge_type = (
                             "connects to" if cls in self.spec.getLayerClasses(2)
                             else "contains"
@@ -434,7 +448,28 @@ class OSGMapper:
             # Update spatial proximity edges among the nodes
             for node, neighbours in nodes_neighbours_map.items():
                 self.OSG.addEdges(node, neighbours, "is near")
-            
+
+        # After adding nodes and edges, update their attributes.
+        # Particularly: update exploration status of nodes, and maintain frontiers
+        for node_key in self.OSG.getNodes():
+            if in_novel_place and node_key == est_state:
+                # Heuristic which skips labelling a newly added node as "explored".
+                # Observations of its surroundings may not yet contain much detail,
+                # so it may not have any nodes, making it vacuously true that it
+                # has been "explored".
+                continue
+
+            node = self.OSG.getNode(node_key)
+            if "explored" in node.keys() and not node["explored"]:
+                # Check if the node is explored, i.e. for Places and
+                # Region Abstractions, whether the contained and connected
+                # nodes are all explored
+                if all([
+                    (self.OSG.isNodeExplored(k) != False) for k in
+                    self.OSG.getChildNodes(node_key) + self.OSG.getConnectedNodes(node_key)
+                ]):
+                    self._updateNodeAttribs(node_key, {"explored": True})
+
         t2 = time.time()
         print("***** Timing:", t2 - t1)
         return est_state, object_nodes
@@ -507,10 +542,10 @@ class OSGMapper:
             view_associations[view] = associations
         return view_associations
 
-    def _addLeafNode(self, cls: str, obs: tuple) -> type[OpenSceneGraph.NodeKey]:
+    def _addLeafNode(self, cls: str, obs: tuple, view: tuple) -> type[OpenSceneGraph.NodeKey]:
         _, lbl, attr, _, crop, _ = obs
         object_attribs = self.OSG.makeNewNodeAttrs(cls, {
-            "label": lbl, "description": attr, "image": crop, 'in_view': None
+            "label": lbl, "description": attr, "image": crop, "in_view": view,
         })
         return self.OSG.addNode(cls, object_attribs)
     
@@ -524,14 +559,30 @@ class OSGMapper:
     def _updateLeafNodeAttribs(
         self,
         node_key: type[OpenSceneGraph.NodeKey],
-        obs: tuple = None,
-        in_view: Optional[tuple[str, int]] = None,
+        obs: Optional[tuple] = None,
+        in_view: Optional[tuple] = None,
     ):
-        update_dict = { "in_view": in_view }
+        update_dict = dict()
+        if in_view is not None:
+            update_dict["in_view"] = in_view
         if obs is not None:
             _, lbl, attr, _, crop, _ = obs
             update_dict["description"] = attr
             update_dict["image"] = crop
+        self.OSG.setNodeAttrs(node_key, update_dict)
+
+    def _updateNodeAttribs(
+        self,
+        node_key: type[OpenSceneGraph.NodeKey],
+        attrs: dict,
+    ):
+        attr_keys = self.spec.getNodeAttrTypes(node_key.node_cls)
+        update_dict = dict()
+        for attr_k, attr_v in attrs.items():
+            if attr_k in attr_keys:
+                update_dict[attr_k] = attr_v
+            else:
+                print(f"Attempted to update invalid attribute [{attr_k}] in node [{node_key.node_cls}]")
         self.OSG.setNodeAttrs(node_key, update_dict)
 
     def _getSimilarPlaces(
@@ -539,7 +590,7 @@ class OSGMapper:
         place_label: str,
         llm_matching: bool = False,
     ) -> list[type[OpenSceneGraph.NodeKey]]:
-        places = self.OSG.getLayer(3)
+        places = self.OSG.getLayerNodes(3)
         if llm_matching:
             raise NotImplementedError
         else:

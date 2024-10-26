@@ -102,7 +102,7 @@ class NavigatorHomeRobot(Navigator):
             # traversable_categories=selected_traversable_categories,
         )
 
-            # Set up flags
+        # Set up flags
         self.controller_active = False
 
         self.env.reset()
@@ -223,6 +223,7 @@ class NavigatorHomeRobot(Navigator):
             self.controller.update(obs)
             images = self.controller.visualise(obs)
             self.env.update_path_distance()
+            print(images.shape)
             cv2.imshow("View", images)
             cv2.waitKey(10)
 
@@ -247,13 +248,13 @@ class NavigatorHomeRobot(Navigator):
                     }
                 }
                 subgoal_position, cam_uuid = self.loop(preprocessed_obs)
-                print(">>> Loop ended")
+                # print(">>> Loop ended")
                 if self.check_goal(self.last_subgoal) and self.success_flag:
                     self.action_logging.write(f"[END]: SUCCESS Checked! \n")
                     break
                 elif (not self.check_goal(self.last_subgoal)) and self.success_flag:
                     self.success_flag = False
-                print('Set Subgoals:',subgoal_position)
+                print('Set Subgoals:', subgoal_position)
                 if subgoal_position is not None:
                     if self.dataset == 'gibson' and  ('television' in self.last_subgoal or 'tv' in self.last_subgoal):
                         subgoal_position[1] += 150
@@ -328,8 +329,8 @@ if __name__ == "__main__":
     test_history = []
     # str(i) for i in range(test_episode)
     while True:
-        scnen_path = nav.env.env.current_episode.scene_id
-        scene_name = scnen_path[scnen_path.rfind('/')+1:scnen_path.rfind('.basis')]
+        scene_path = nav.env.env.current_episode.scene_id
+        scene_name = scene_path[scene_path.rfind('/')+1:scene_path.rfind('.basis')]
         # episode = rerun_case[scene_name]
         while str(nav.env.env.current_episode.episode_id) not in ['1'] or ((nav.env.env.current_episode.scene_id + str(nav.env.env.current_episode.episode_id) ) in test_history):
             try:

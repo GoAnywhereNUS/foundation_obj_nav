@@ -49,11 +49,17 @@ class OSGMetaStructure:
     """
 
     node_templates = {
-        'Object': {'label': str, 'id': int, 'description': str, 'image': torch.Tensor, 'in_view': Optional[tuple[str, int]]},
-        'Connector': {'label': str, 'id': int, 'description': str, 'image': torch.Tensor, 'in_view': bool},
-        'Place': {'class': str, 'label': str, 'id': int},
-        'Region Abstraction': {'label': str, 'id': int},
+        'Object': {'label': str, 'id': int, 'description': str, 'image': torch.Tensor, 'in_view': tuple[str, int]},
+        'Connector': {'label': str, 'id': int, 'description': str, 'image': torch.Tensor, 'in_view': tuple[str, int], 'explored': bool},
+        'Place': {'class': str, 'label': str, 'id': int, 'explored': bool},
+        'Region Abstraction': {'label': str, 'id': int, 'explored': bool},
     }
+
+    edge_types = [
+        'is near',
+        'connects to',
+        'contains',
+    ]
         
     @staticmethod
     def validate(spec):
@@ -232,6 +238,12 @@ class OSGSpec(OSGMetaStructure):
         }
         return attrs
     
+    def getNodeAttrTypes(self, node_cls):
+        return self._node_attrs[node_cls].keys()
+    
+    def getEdgeTypes(self):
+        return self.edge_types
+    
     def getClassSpec(self, node_cls):
         return self._class_view[node_cls]
     
@@ -386,19 +398,38 @@ class OpenSceneGraph:
         self.G.remove_edges_from(outgoing_edges)
 
     ### Querying data from OSG
+    def isNodeExplored(self, node_key: type[NodeKey]) -> Optional[bool]:
+        node = self.G.nodes()[node_key]
+        if "explored" not in node.keys():
+            return None
+        else:
+            return node["explored"]
+
+    def getNodes(self):
+        return self.G.nodes()
+
     def getClass(self, node_class: str):
         return [
             node for node, attrs in self.G.nodes(data=True) 
             if attrs["class"] == node_class
         ]
         
-    def getLayer(self, layer: int):
+    def getLayerNodes(self, layer: int):
         layer_classes = self.spec.getLayerClasses(layer)
         return [
             node for node in self.G.nodes()
             if node.node_cls in layer_classes
         ]
     
+    def getLayerSubgraph(self, layer: int):
+        nodes = self.getLayerNodes(layer)
+        if layer != 1: # Ensure that the layer is a region layer
+            layer_nodes = set(nodes)
+            for node_key in nodes:
+                layer_nodes.update(self.getConnectedNodes(node_key))
+            nodes = list(layer_nodes)
+        return self.G.subgraph(nodes)
+
     def getDestNodes(
         self,
         src_node_key: type[NodeKey],
@@ -570,9 +601,33 @@ class OpenSceneGraph:
         plt.title("Hierarchical Graph Visualization")
         plt.savefig("imgs/osg.png")
 
-    def printGraph(self):
-        raise NotImplementedError
-    
+    def printGraph(self, subgraph=None, output_json=True, pretty=False):
+        """
+        Prints a subgraph of the OSG if provided with one. If not, prints the entire OSG.
+        """
+        graph = self.G if subgraph is None else subgraph
+        graph_nodes = graph.nodes()
+        
+        # Identify all node classes in the subgraph
+        node_classes = set([node.node_cls for node in graph_nodes])
+        sg_dict = dict()
+        for cls in node_classes:
+            node_cls_instances = [node for node in graph_nodes if node.node_cls == cls]
+            sg_dict[cls] = {
+                str(node): {
+                    etype: [
+                        dst for _, dst, atts in graph.edges(node, data=True)
+                        if atts['edge_type'] == etype
+                    ] 
+                    for etype in {atts['edge_type'] for _, _, atts in graph.edges(node, data=True)}
+                } 
+                for node in node_cls_instances
+            }
+
+        if output_json:
+            return json.dumps(sg_dict, indent=(2 if pretty else None))
+        else:
+            return sg_dict
 
 if __name__ == "__main__":
     graph = OpenSceneGraph(default_scene_graph_specs)
